@@ -47,8 +47,8 @@ Aplicación Android nativa (Kotlin + Jetpack Compose) orientada a **recuperació
    - Amplía rutas de escaneo compartido.
 
 3. **Forense (opcional)**
-   - Flujo preparado para integraciones futuras con Shizuku/ADB.
-   - Actualmente mantiene procesamiento local y mismo motor base.
+   - Detección local de capacidad forense (Shizuku instalado / ADB visible).
+   - Mantiene procesamiento local; el puente forense sigue siendo opcional.
 
 4. **Root (futuro)**
    - No implementado en esta base inicial.
@@ -62,6 +62,10 @@ Aplicación Android nativa (Kotlin + Jetpack Compose) orientada a **recuperació
   - `DCIM`, `Pictures`, `Movies`, `Music`, `Download`,
   - `WhatsApp/Media`, `Telegram`, `Android/media`,
   - `.thumbnails` y cachés accesibles.
+- Escaneo adicional por **Storage Access Framework (SAF)**:
+  - selección de árbol/carpeta por el usuario,
+  - persistencia del permiso URI,
+  - escaneo de contenido accesible dentro del árbol seleccionado.
 - Detector por firma mágica:
   - JPG, PNG, WEBP/RIFF, MP4/ftyp, OGG/OPUS, MP3, AMR, PDF.
 - Carving básico:
@@ -73,10 +77,12 @@ Aplicación Android nativa (Kotlin + Jetpack Compose) orientada a **recuperació
 - UI:
   - aviso legal/ético,
   - selector de modo,
+  - estado de capacidad forense detectada (Shizuku/ADB),
+  - selector de carpeta SAF para modo avanzado/forense,
   - iniciar / pausar / reanudar / cancelar escaneo,
   - progreso en tiempo real,
   - filtros y vista grid/lista,
-  - detalle técnico de hallazgos.
+  - detalle técnico de hallazgos + apertura externa de imagen/audio/video.
 - Exportación:
   - CSV, JSON, HTML, ZIP de recuperados y log técnico.
 
@@ -124,7 +130,7 @@ sdk.dir=/ruta/a/android-sdk
 
 ## Próximos pasos sugeridos
 
-- Integración real con Shizuku/ADB en modo forense.
-- SAF avanzado para seleccionar volúmenes/directorios por árbol.
-- Reproductor multimedia embebido en la pantalla de detalle.
+- Integración activa de comandos forenses vía Shizuku/ADB (ejecución real, no solo detección).
+- Correlación automática más robusta entre miniaturas, originales y fragmentos carved.
+- Reproductor multimedia embebido (actualmente se abre con app externa vía intent).
 - Tests instrumentados del motor de escaneo y exportación.

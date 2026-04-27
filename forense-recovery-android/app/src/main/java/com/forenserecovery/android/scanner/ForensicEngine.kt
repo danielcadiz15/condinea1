@@ -1,7 +1,9 @@
 package com.forenserecovery.android.scanner
 
-import android.media.MediaMetadataRetriever
+import android.content.Context
+import android.content.Context
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import androidx.exifinterface.media.ExifInterface
 import com.forenserecovery.android.domain.model.RecoveryItem
 import com.forenserecovery.android.domain.model.RecoveryStatus
@@ -30,12 +32,14 @@ class ForensicEngine(
 
     private val mediaStoreScanner = MediaStoreScanner(context)
     private val sharedStorageScanner = SharedStorageScanner(context)
+    private val safScanner = SafScanner(context)
     private val controlCenter = ScanRuntimeControl.controlCenter()
     private val writer = RecoveryFileWriter(context)
 
     suspend fun runScan(
         mode: ScanMode,
         clearPrevious: Boolean,
+        safTreeUri: String?,
         onProgress: suspend (ScanProgress) -> Unit
     ): ScanSummaryResult = withContext(Dispatchers.IO) {
         if (clearPrevious) repository.clear()
@@ -91,6 +95,23 @@ class ForensicEngine(
                 }
 
                 for (hit in storageHits) {
+                    currentCoroutineContext().ensureActive()
+                    if (controlCenter.isCancelled()) break
+                    controlCenter.awaitIfPaused()
+                    if (ingestCandidate(hit, technicalLog)) discovered += 1
+                }
+            }
+
+            if (!controlCenter.isCancelled() && !safTreeUri.isNullOrBlank()) {
+                val safHits = safScanner.scanTreeUri(safTreeUri) { currentPath ->
+                    controlCenter.awaitIfPaused()
+                    currentCoroutineContext().ensureActive()
+                    if (!controlCenter.isCancelled()) {
+                        scanned += 1
+                        tick(stage = "Escaneando árbol SAF", path = currentPath)
+                    }
+                }
+                for (hit in safHits) {
                     currentCoroutineContext().ensureActive()
                     if (controlCenter.isCancelled()) break
                     controlCenter.awaitIfPaused()

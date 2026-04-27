@@ -11,6 +11,7 @@ import com.forenserecovery.android.domain.model.ScanMode
 import com.forenserecovery.android.domain.model.ScanProgress
 import com.forenserecovery.android.domain.usecase.matchesFilter
 import com.forenserecovery.android.export.ExportManager
+import com.forenserecovery.android.recovery.ForensicCapabilityDetector
 import com.forenserecovery.android.recovery.ScanCoordinator
 import com.forenserecovery.android.recovery.ScanRuntimeControl
 import com.forenserecovery.android.recovery.ScanWorker
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 data class MainUiState(
     val selectedMode: ScanMode = ScanMode.BASIC,
     val selectedFilter: ItemFilter = ItemFilter.ALL,
+    val selectedSafTreeUri: String? = null,
     val viewMode: ItemViewMode = ItemViewMode.GRID,
     val progress: ScanProgress = ScanProgress(),
     val workerState: ScanWorkerState = ScanWorkerState.Idle,
@@ -31,6 +33,7 @@ data class MainUiState(
     val technicalLog: List<String> = emptyList(),
     val selectedItem: RecoveryItem? = null,
     val lastExportPath: String? = null,
+    val forensicCapability: String = "No evaluado",
     val message: String? = null
 )
 
@@ -47,6 +50,9 @@ class MainViewModel(
     val ui: StateFlow<MainUiState> = _ui
 
     init {
+        _ui.update {
+            it.copy(forensicCapability = ForensicCapabilityDetector.describeForensicCapability(getApplication()))
+        }
         observeItems()
         observeWorkerState()
         observeWorkerProgress()
@@ -144,7 +150,16 @@ class MainViewModel(
     }
 
     fun selectMode(mode: ScanMode) {
-        _ui.update { it.copy(selectedMode = mode) }
+        val capability = if (mode == ScanMode.FORENSIC) {
+            ForensicCapabilityDetector.describeForensicCapability(getApplication())
+        } else {
+            _ui.value.forensicCapability
+        }
+        _ui.update { it.copy(selectedMode = mode, forensicCapability = capability) }
+    }
+
+    fun setSafTreeUri(uri: String?) {
+        _ui.update { it.copy(selectedSafTreeUri = uri) }
     }
 
     fun selectFilter(filter: ItemFilter) {
@@ -167,7 +182,9 @@ class MainViewModel(
 
     fun startScan(clearPrevious: Boolean = false) {
         val mode = _ui.value.selectedMode
+        val safTreeUri = _ui.value.selectedSafTreeUri
         ScanRuntimeControl.reset()
+        ScanRuntimeControl.setSafTreeUri(safTreeUri)
         scanCoordinator.enqueueScan(mode = mode, clearPrevious = clearPrevious)
         _ui.update {
             it.copy(
@@ -202,6 +219,10 @@ class MainViewModel(
     fun cancelScan() {
         ScanRuntimeControl.cancel()
         scanCoordinator.cancelScan()
+        ScanRuntimeControl.setSafTreeUri(null)
+        _ui.update {
+            it.copy(selectedSafTreeUri = null)
+        }
     }
 
     fun exportAll() {
@@ -220,11 +241,13 @@ class MainViewModel(
     fun clearDatabase() {
         viewModelScope.launch {
             repository.clear()
+            ScanRuntimeControl.setSafTreeUri(null)
             _ui.update {
                 it.copy(
                     selectedItem = null,
                     allItems = emptyList(),
                     items = emptyList(),
+                    selectedSafTreeUri = null,
                     technicalLog = emptyList(),
                     message = "Base local limpiada"
                 )

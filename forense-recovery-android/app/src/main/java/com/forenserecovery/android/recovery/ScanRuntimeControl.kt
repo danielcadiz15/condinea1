@@ -8,6 +8,8 @@ import com.forenserecovery.android.scanner.ScanControlCenter
  */
 object ScanRuntimeControl {
     private val control = ScanControlCenter()
+    @Volatile
+    private var safTreeUri: String? = null
 
     fun controlCenter(): ScanControlCenter = control
 
@@ -20,4 +22,10 @@ object ScanRuntimeControl {
     fun cancel() = control.cancel()
 
     fun isCancelled(): Boolean = control.isCancelled()
+
+    fun setSafTreeUri(uri: String?) {
+        safTreeUri = uri
+    }
+
+    fun getSafTreeUri(): String? = safTreeUri
 }

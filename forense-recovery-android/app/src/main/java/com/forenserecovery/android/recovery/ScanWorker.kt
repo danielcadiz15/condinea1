@@ -22,10 +22,15 @@ class ScanWorker(
             ScanMode.valueOf(inputData.getString(KEY_MODE) ?: ScanMode.BASIC.name)
         }.getOrDefault(ScanMode.BASIC)
         val clear = inputData.getBoolean(KEY_CLEAR_PREVIOUS, false)
+        val safTreeUri = ScanRuntimeControl.getSafTreeUri()
         val engine = ForensicEngine(applicationContext, app.recoveryRepository)
 
         return runCatching {
-            val summary = engine.runScan(mode = mode, clearPrevious = clear) { progress ->
+            val summary = engine.runScan(
+                mode = mode,
+                clearPrevious = clear,
+                safTreeUri = safTreeUri
+            ) { progress ->
                 latestProgress.emit(progress)
                 setProgress(
                     Data.Builder()

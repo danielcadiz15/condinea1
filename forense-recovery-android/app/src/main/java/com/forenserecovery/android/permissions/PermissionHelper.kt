@@ -1,15 +1,15 @@
 package com.forenserecovery.android.permissions
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import android.content.Context
 import androidx.core.content.ContextCompat
-import com.forenserecovery.android.domain.model.ScanMode
 import android.content.pm.PackageManager
+import com.forenserecovery.android.domain.model.ScanMode
 
 object PermissionHelper {
     fun requiredPermissions(mode: ScanMode): Array<String> {

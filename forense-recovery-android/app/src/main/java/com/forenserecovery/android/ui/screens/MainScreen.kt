@@ -2,6 +2,8 @@ package com.forenserecovery.android.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,14 +45,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.forenserecovery.android.domain.model.ItemFilter
 import com.forenserecovery.android.domain.model.ItemViewMode
 import com.forenserecovery.android.domain.model.RecoveryItem
+import com.forenserecovery.android.domain.model.RecoveryType
 import com.forenserecovery.android.domain.model.ScanMode
 import com.forenserecovery.android.permissions.PermissionHelper
 import com.forenserecovery.android.ui.viewmodel.MainViewModel
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +75,21 @@ fun MainScreen(
         } else {
             viewModel.showMessage("Faltan permisos para iniciar escaneo.")
         }
+    }
+
+    val safTreeLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri == null) {
+            viewModel.showMessage("No se seleccionó carpeta SAF.")
+            return@rememberLauncherForActivityResult
+        }
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+        }
+        viewModel.setSafTreeUri(uri.toString())
+        viewModel.showMessage("Árbol SAF configurado para escaneo: $uri")
     }
 
     LaunchedEffect(state.message) {
@@ -100,6 +120,12 @@ fun MainScreen(
                     viewModel.selectMode(it)
                     viewModel.showMessage(PermissionHelper.modeDescription(it))
                 }
+            )
+            ForensicStatusCard(
+                mode = state.selectedMode,
+                capability = state.forensicCapability,
+                safTree = state.selectedSafTreeUri,
+                onSelectSafTree = { safTreeLauncher.launch(null) }
             )
             ScanControls(
                 state = state,
@@ -162,7 +188,44 @@ fun MainScreen(
     }
 
     state.selectedItem?.let { selected ->
-        ItemDetailDialog(item = selected, onDismiss = { viewModel.selectItem(null) })
+        ItemDetailDialog(
+            item = selected,
+            onDismiss = { viewModel.selectItem(null) },
+            onOpenExternal = { item ->
+                val path = item.recoveredPath ?: item.originalPath
+                if (path.isNullOrBlank()) {
+                    viewModel.showMessage("No hay ruta de archivo para abrir.")
+                    return@ItemDetailDialog
+                }
+                val file = File(path)
+                if (!file.exists()) {
+                    viewModel.showMessage("Archivo no encontrado en disco.")
+                    return@ItemDetailDialog
+                }
+                val uri = runCatching {
+                    FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.provider",
+                        file
+                    )
+                }.getOrElse {
+                    Uri.fromFile(file)
+                }
+                val mime = item.mimeType ?: when (item.type) {
+                    RecoveryType.IMAGE -> "image/*"
+                    RecoveryType.VIDEO -> "video/*"
+                    RecoveryType.AUDIO -> "audio/*"
+                    else -> "*/*"
+                }
+                val intent = Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, mime)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val ok = runCatching { context.startActivity(intent) }.isSuccess
+                if (!ok) {
+                    viewModel.showMessage("No se pudo abrir el archivo con una app externa.")
+                }
+            }
+        )
     }
 }
 
@@ -209,6 +272,32 @@ private fun ModeSelector(
                 "Básico: MediaStore. Avanzado: añade All Files Access. Forense: integración opcional con Shizuku/ADB.",
                 style = MaterialTheme.typography.bodySmall
             )
+        }
+    }
+}
+
+@Composable
+private fun ForensicStatusCard(
+    mode: ScanMode,
+    capability: String,
+    safTree: String?,
+    onSelectSafTree: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Estado forense", fontWeight = FontWeight.Bold)
+            Text(capability, style = MaterialTheme.typography.bodySmall)
+            Text(
+                "SAF seleccionado: ${safTree ?: "ninguno"}",
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (mode == ScanMode.FORENSIC || mode == ScanMode.ADVANCED) {
+                OutlinedButton(onClick = onSelectSafTree) {
+                    Text("Seleccionar carpeta SAF")
+                }
+            }
         }
     }
 }
@@ -368,12 +457,21 @@ private fun ListContent(
 @Composable
 private fun ItemDetailDialog(
     item: RecoveryItem,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpenExternal: (RecoveryItem) -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            Button(onClick = onDismiss) { Text("Cerrar") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (item.type == RecoveryType.AUDIO ||
+                    item.type == RecoveryType.VIDEO ||
+                    item.type == RecoveryType.IMAGE
+                ) {
+                    OutlinedButton(onClick = { onOpenExternal(item) }) { Text("Abrir") }
+                }
+                Button(onClick = onDismiss) { Text("Cerrar") }
+            }
         },
         title = { Text("Detalle técnico") },
         text = {
