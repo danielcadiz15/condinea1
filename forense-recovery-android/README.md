@@ -128,6 +128,27 @@ Si el entorno no tiene Android SDK configurado, define `ANDROID_HOME` o crea `lo
 sdk.dir=/ruta/a/android-sdk
 ```
 
+## Probar desde Chrome en Android (sin Android Studio)
+
+El repositorio incluye un workflow de GitHub Actions:
+
+- `.github/workflows/android-apk.yml`
+
+Qué hace:
+
+1. Compila `app-debug.apk` en cada push.
+2. Sube el APK como artifact del workflow.
+3. Actualiza una prerelease fija con tag `android-latest-debug`.
+
+Cómo probar desde tu teléfono:
+
+1. Entra al repositorio en GitHub desde Chrome.
+2. Ve a **Releases** y abre `Forense Recovery Android - Latest Debug`.
+3. Descarga `app-debug.apk`.
+4. Instálalo (habilitando “instalar apps desconocidas” para Chrome/Archivos si hace falta).
+
+También puedes descargar el artifact desde la pestaña **Actions** en la ejecución más reciente.
+
 ## Próximos pasos sugeridos
 
 - Integración activa de comandos forenses vía Shizuku/ADB (ejecución real, no solo detección).
