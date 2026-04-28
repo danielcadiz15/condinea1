@@ -6,6 +6,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,11 +19,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -135,7 +132,8 @@ fun MainScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(12.dp),
+                .padding(12.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             LegalNoticeCard()
@@ -233,6 +231,7 @@ fun MainScreen(
 
             if (state.viewMode == ItemViewMode.GRID) {
                 GridContent(
+                    modifier = Modifier.fillMaxWidth(),
                     items = state.items,
                     selectedIds = state.selectedRestoreIds,
                     onSelectItem = { viewModel.selectItem(it) },
@@ -240,6 +239,7 @@ fun MainScreen(
                 )
             } else {
                 ListContent(
+                    modifier = Modifier.fillMaxWidth(),
                     items = state.items,
                     selectedIds = state.selectedRestoreIds,
                     onSelectItem = { viewModel.selectItem(it) },
@@ -392,18 +392,18 @@ private fun ForensicStatusCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            if (mode == ScanMode.FORENSIC || mode == ScanMode.ADVANCED) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (mode == ScanMode.FORENSIC || mode == ScanMode.ADVANCED) {
                     OutlinedButton(onClick = onSelectSafTree) {
                         Text("Seleccionar carpeta SAF")
                     }
-                    TextButton(onClick = onShowShizukuHelp) {
-                        Text("Ayuda Shizuku")
-                    }
+                }
+                TextButton(onClick = onShowShizukuHelp) {
+                    Text("Ayuda Shizuku")
                 }
             }
         }
@@ -674,20 +674,22 @@ private fun ShizukuHelpDialog(onDismiss: () -> Unit) {
 
 @Composable
 private fun GridContent(
+    modifier: Modifier = Modifier,
     items: List<RecoveryItem>,
     selectedIds: Set<Long>,
     onSelectItem: (RecoveryItem) -> Unit,
     onToggleSelection: (Long) -> Unit
 ) {
-    LazyVerticalGrid(
-        modifier = Modifier.fillMaxWidth(),
-        columns = GridCells.Adaptive(140.dp),
+    FlowRow(
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(items) { item ->
+        items.forEach { item ->
             Card(
-                modifier = Modifier.clickable { onSelectItem(item) }
+                modifier = Modifier
+                    .widthIn(min = 140.dp, max = 220.dp)
+                    .clickable { onSelectItem(item) }
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
                     Row(
@@ -725,16 +727,17 @@ private fun GridContent(
 
 @Composable
 private fun ListContent(
+    modifier: Modifier = Modifier,
     items: List<RecoveryItem>,
     selectedIds: Set<Long>,
     onSelectItem: (RecoveryItem) -> Unit,
     onToggleSelection: (Long) -> Unit
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxWidth(),
+    Column(
+        modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(items, key = { it.id }) { item ->
+        items.forEach { item ->
             Card(modifier = Modifier.fillMaxWidth().clickable { onSelectItem(item) }) {
                 Column(modifier = Modifier.padding(10.dp)) {
                     Row(
