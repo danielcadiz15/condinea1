@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,6 +36,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -63,7 +66,7 @@ import com.forenserecovery.android.permissions.PermissionHelper
 import com.forenserecovery.android.ui.viewmodel.MainViewModel
 import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MainScreen(
     viewModel: MainViewModel
@@ -71,6 +74,7 @@ fun MainScreen(
     val state by viewModel.ui.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
+    var showShizukuHelp by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -150,7 +154,8 @@ fun MainScreen(
                 mode = state.selectedMode,
                 capability = state.forensicCapability,
                 safTree = state.selectedSafTreeUri,
-                onSelectSafTree = { safTreeLauncher.launch(null) }
+                onSelectSafTree = { safTreeLauncher.launch(null) },
+                onShowShizukuHelp = { showShizukuHelp = true }
             )
             ScanControls(
                 state = state,
@@ -284,6 +289,10 @@ fun MainScreen(
             }
         )
     }
+
+    if (showShizukuHelp) {
+        ShizukuHelpDialog(onDismiss = { showShizukuHelp = false })
+    }
 }
 
 @Composable
@@ -300,6 +309,7 @@ private fun LegalNoticeCard() {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ModeSelector(
     selected: ScanMode,
@@ -308,7 +318,11 @@ private fun ModeSelector(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Modo de acceso", fontWeight = FontWeight.Bold)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 ScanMode.entries.forEach { mode ->
                     FilterChip(
                         selected = selected == mode,
@@ -333,6 +347,7 @@ private fun ModeSelector(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ScanProfileSelector(
     selected: ScanProfile,
@@ -341,7 +356,11 @@ private fun ScanProfileSelector(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Tipo de escaneo", fontWeight = FontWeight.Bold)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 ScanProfile.entries.forEach { profile ->
                     FilterChip(
                         selected = selected == profile,
@@ -354,12 +373,14 @@ private fun ScanProfileSelector(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ForensicStatusCard(
     mode: ScanMode,
     capability: String,
     safTree: String?,
-    onSelectSafTree: () -> Unit
+    onSelectSafTree: () -> Unit,
+    onShowShizukuHelp: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -372,14 +393,24 @@ private fun ForensicStatusCard(
                 overflow = TextOverflow.Ellipsis
             )
             if (mode == ScanMode.FORENSIC || mode == ScanMode.ADVANCED) {
-                OutlinedButton(onClick = onSelectSafTree) {
-                    Text("Seleccionar carpeta SAF")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(onClick = onSelectSafTree) {
+                        Text("Seleccionar carpeta SAF")
+                    }
+                    TextButton(onClick = onShowShizukuHelp) {
+                        Text("Ayuda Shizuku")
+                    }
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ScanControls(
     state: com.forenserecovery.android.ui.viewmodel.MainUiState,
@@ -389,7 +420,11 @@ private fun ScanControls(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Button(onClick = onStartScan, enabled = !state.progress.isRunning) {
                     Text("Iniciar escaneo")
                 }
@@ -413,6 +448,10 @@ private fun ScanControls(
                         else -> 0f
                     }
                 }.getOrDefault(0f)
+                val zoneLabel = buildScanZoneLabel(
+                    stage = state.progress.stage,
+                    currentPath = state.progress.currentPath
+                )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CircularProgressIndicator(modifier = Modifier.height(24.dp))
                     Text("${state.progress.stage} (${state.progress.scanned} analizados / ${state.progress.discovered} hallazgos)")
@@ -421,9 +460,14 @@ private fun ScanControls(
                     progress = { progressValue },
                     modifier = Modifier.fillMaxWidth()
                 )
+                Text(
+                    text = "Zona actual: $zoneLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold
+                )
                 if (state.progress.currentPath.isNotBlank()) {
                     Text(
-                        state.progress.currentPath,
+                        "Ruta: ${state.progress.currentPath}",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodySmall
@@ -436,6 +480,7 @@ private fun ScanControls(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FilterRow(
     selectedFilter: ItemFilter,
@@ -445,31 +490,37 @@ private fun FilterRow(
     onFolderChanged: (String) -> Unit
 ) {
     var showFolders by remember { mutableStateOf(false) }
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        ItemFilter.entries.forEach { filter ->
-            FilterChip(
-                selected = selectedFilter == filter,
-                onClick = { onFilterChanged(filter) },
-                label = {
-                    Text(
-                        text = when (filter) {
-                            ItemFilter.ALL -> "Todos"
-                            ItemFilter.IMAGE -> "Imagen"
-                            ItemFilter.VIDEO -> "Video"
-                            ItemFilter.AUDIO -> "Audio"
-                            ItemFilter.THUMBNAIL -> "Miniatura"
-                            ItemFilter.PARTIAL -> "Parcial"
-                            ItemFilter.CORRUPT -> "Corrupto"
-                        },
-                        modifier = Modifier.widthIn(min = 44.dp)
-                    )
-                }
-            )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            ItemFilter.entries.forEach { filter ->
+                FilterChip(
+                    selected = selectedFilter == filter,
+                    onClick = { onFilterChanged(filter) },
+                    label = {
+                        Text(
+                            text = when (filter) {
+                                ItemFilter.ALL -> "Todos"
+                                ItemFilter.IMAGE -> "Imagen"
+                                ItemFilter.VIDEO -> "Video"
+                                ItemFilter.AUDIO -> "Audio"
+                                ItemFilter.THUMBNAIL -> "Miniatura"
+                                ItemFilter.PARTIAL -> "Parcial"
+                                ItemFilter.CORRUPT -> "Corrupto"
+                            },
+                            modifier = Modifier.widthIn(min = 44.dp)
+                        )
+                    }
+                )
+            }
         }
         Box {
             OutlinedButton(onClick = { showFolders = true }) {
@@ -498,6 +549,7 @@ private fun FilterRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RestoreActionsCard(
     state: com.forenserecovery.android.ui.viewmodel.MainUiState,
@@ -519,7 +571,11 @@ private fun RestoreActionsCard(
                 "Seleccionadas: ${state.selectedRestoreIds.size} | Visibles: ${state.items.size}",
                 style = MaterialTheme.typography.bodySmall
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 OutlinedButton(onClick = onSelectDestination) { Text("Elegir destino") }
                 OutlinedButton(onClick = onRestoreSelected, enabled = state.selectedRestoreIds.isNotEmpty() && !state.isRestoring) {
                     Text("Restaurar seleccionadas")
@@ -539,6 +595,7 @@ private fun RestoreActionsCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ExportRow(
     onExportAll: () -> Unit,
@@ -547,12 +604,72 @@ private fun ExportRow(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Exportación de informe", fontWeight = FontWeight.Bold)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 OutlinedButton(onClick = onExportAll) { Text("CSV/JSON/HTML/ZIP") }
                 OutlinedButton(onClick = onClearDatabase) { Text("Limpiar BD") }
             }
         }
     }
+}
+
+private fun buildScanZoneLabel(
+    stage: String,
+    currentPath: String
+): String {
+    if (currentPath.startsWith("content://")) {
+        return "Contenido SAF/MediaStore"
+    }
+    if (currentPath.isBlank()) {
+        return when {
+            stage.contains("MediaStore", ignoreCase = true) -> "MediaStore"
+            stage.contains("SAF", ignoreCase = true) -> "Árbol SAF"
+            stage.contains("almacenamiento", ignoreCase = true) -> "Almacenamiento compartido"
+            stage.contains("preparando", ignoreCase = true) -> "Inicializando escaneo"
+            else -> "Sin ruta activa todavía"
+        }
+    }
+
+    val normalized = currentPath.replace('\\', '/')
+    val parts = normalized.split('/').filter { it.isNotBlank() }
+    val highlights = listOf("DCIM", "Pictures", "Movies", "Music", "Download", "WhatsApp", "Telegram", "Android")
+    val firstMatch = parts.firstOrNull { it in highlights }
+    if (firstMatch != null) {
+        return firstMatch
+    }
+    return parts.takeLast(2).joinToString("/").ifBlank { "Ruta activa" }
+}
+
+@Composable
+private fun ShizukuHelpDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("Entendido") }
+        },
+        title = { Text("Cómo habilitar Shizuku") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "Para usar el modo forense ampliado con Shizuku:",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text("1) Instala Shizuku desde Play Store o GitHub.")
+                Text("2) Activa Opciones de desarrollador en Android.")
+                Text("3) Habilita Depuración inalámbrica o conecta por USB (ADB).")
+                Text("4) Abre Shizuku y pulsa Start para iniciar el servicio.")
+                Text("5) Regresa a esta app y permite autorización cuando Shizuku la solicite.")
+                Text("6) Si no hay puente activo, la app seguirá en modo local estándar.")
+                Text(
+                    "Nota: Shizuku no da root; solo permite ejecutar operaciones autorizadas por el usuario.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    )
 }
 
 @Composable
