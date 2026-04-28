@@ -4,12 +4,15 @@ import androidx.compose.runtime.Composable
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.forenserecovery.android.ui.screens.MainScreen
 import com.forenserecovery.android.ui.viewmodel.MainViewModel
+import com.forenserecovery.android.ui.viewmodel.MonetizationViewModel
 
 @Composable
 fun ForenseRecoveryApp(
-    viewModel: MainViewModel = viewModel()
+    viewModel: MainViewModel = viewModel(),
+    monetizationViewModel: MonetizationViewModel = viewModel()
 ) {
     MainScreen(
-        viewModel = viewModel
+        viewModel = viewModel,
+        monetizationViewModel = monetizationViewModel
     )
 }

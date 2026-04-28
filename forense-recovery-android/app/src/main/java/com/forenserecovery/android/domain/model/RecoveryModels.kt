@@ -24,7 +24,8 @@ enum class RecoveryStatus {
 enum class ScanMode {
     BASIC,
     ADVANCED,
-    FORENSIC
+    FORENSIC,
+    ROOT
 }
 
 enum class ScanProfile(

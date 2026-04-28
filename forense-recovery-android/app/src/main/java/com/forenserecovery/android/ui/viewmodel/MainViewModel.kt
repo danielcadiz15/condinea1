@@ -12,6 +12,7 @@ import com.forenserecovery.android.domain.model.ScanProgress
 import com.forenserecovery.android.domain.model.ScanProfile
 import com.forenserecovery.android.domain.usecase.matchesFilter
 import com.forenserecovery.android.export.ExportManager
+import com.forenserecovery.android.monetization.MonetizationManager
 import com.forenserecovery.android.recovery.ForensicCapabilityDetector
 import com.forenserecovery.android.recovery.RestoreManager
 import com.forenserecovery.android.recovery.ScanCoordinator
@@ -28,6 +29,8 @@ import kotlinx.coroutines.launch
 data class MainUiState(
     val selectedMode: ScanMode = ScanMode.BASIC,
     val selectedScanProfile: ScanProfile = ScanProfile.BALANCED,
+    val monetization: com.forenserecovery.android.monetization.MonetizationState =
+        com.forenserecovery.android.monetization.MonetizationState(),
     val selectedFilter: ItemFilter = ItemFilter.ALL,
     val selectedSafTreeUri: String? = null,
     val selectedSourceFolder: String = "Todas",
@@ -41,6 +44,7 @@ data class MainUiState(
     val visibleItemsTarget: Int = DEFAULT_VISIBLE_PAGE_SIZE,
     val selectedRestoreIds: Set<Long> = emptySet(),
     val selectedRestoreDestinationUri: String? = null,
+    val selectedRestoreDestinationLabel: String? = null,
     val isRestoring: Boolean = false,
     val technicalLog: List<String> = emptyList(),
     val selectedItem: RecoveryItem? = null,
@@ -62,6 +66,7 @@ class MainViewModel(
     private val exportManager = ExportManager(application)
     private val restoreManager = RestoreManager(application)
     private val shizukuBridgeManager = ShizukuBridgeManager(application)
+    private val monetizationManager = MonetizationManager(application)
 
     private val _ui = MutableStateFlow(MainUiState())
     val ui: StateFlow<MainUiState> = _ui
@@ -77,6 +82,13 @@ class MainViewModel(
         observeWorkerState()
         observeWorkerProgress()
         observeTechnicalLog()
+        observeMonetization()
+        monetizationManager.start()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        monetizationManager.stop()
     }
 
     private fun observeItems() {
@@ -191,6 +203,14 @@ class MainViewModel(
     }
 
     fun selectMode(mode: ScanMode) {
+        if (!hasModeAccess(mode)) {
+            _ui.update {
+                it.copy(
+                    message = "Modo premium bloqueado. Desbloquea Premium para usar Forense."
+                )
+            }
+            return
+        }
         val capability = ForensicCapabilityDetector.describeForensicCapability(getApplication())
         _ui.update {
             it.copy(
@@ -211,6 +231,18 @@ class MainViewModel(
 
     fun refreshShizukuState() {
         refreshForensicStatus()
+    }
+
+    fun restorePurchases() {
+        monetizationManager.restorePurchases()
+        _ui.update { it.copy(message = "Restaurando compras...") }
+    }
+
+    fun launchPremiumPurchase(activity: android.app.Activity, productId: String) {
+        val launched = monetizationManager.launchPurchase(activity, productId)
+        if (!launched) {
+            _ui.update { it.copy(message = "No se pudo abrir Google Play Billing para esta compra.") }
+        }
     }
 
     fun selectFilter(filter: ItemFilter) {
@@ -276,8 +308,31 @@ class MainViewModel(
         _ui.update { it.copy(selectedRestoreIds = emptySet()) }
     }
 
-    fun selectRestoreDestination(uri: String?) {
-        _ui.update { it.copy(selectedRestoreDestinationUri = uri) }
+    fun toggleSelectAllVisible() {
+        _ui.update { state ->
+            if (state.items.isEmpty()) {
+                state
+            } else {
+                val visibleIds = state.items.map { it.id }.toSet()
+                val allVisibleSelected = visibleIds.all { it in state.selectedRestoreIds }
+                val updated = state.selectedRestoreIds.toMutableSet()
+                if (allVisibleSelected) {
+                    updated.removeAll(visibleIds)
+                } else {
+                    updated.addAll(visibleIds)
+                }
+                state.copy(selectedRestoreIds = updated)
+            }
+        }
+    }
+
+    fun selectRestoreDestination(uri: String?, label: String?) {
+        _ui.update {
+            it.copy(
+                selectedRestoreDestinationUri = uri,
+                selectedRestoreDestinationLabel = label
+            )
+        }
     }
 
     fun restoreSelected() {
@@ -399,6 +454,7 @@ class MainViewModel(
                     selectedSourceFolder = "Todas",
                     availableSourceFolders = listOf("Todas"),
                     selectedRestoreDestinationUri = null,
+                    selectedRestoreDestinationLabel = null,
                     selectedRestoreIds = emptySet(),
                     technicalLog = emptyList(),
                     message = "Base local limpiada"
@@ -483,5 +539,28 @@ class MainViewModel(
                 )
             }
         }
+    }
+
+    private fun observeMonetization() {
+        viewModelScope.launch {
+            monetizationManager.state.collect { monetization ->
+                _ui.update { state ->
+                    state.copy(
+                        monetization = monetization,
+                        selectedMode = if (!monetization.isPremiumUnlocked &&
+                            state.selectedMode != ScanMode.BASIC
+                        ) {
+                            ScanMode.BASIC
+                        } else {
+                            state.selectedMode
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private fun hasModeAccess(mode: ScanMode): Boolean {
+        return mode == ScanMode.BASIC || _ui.value.monetization.isPremiumUnlocked
     }
 }

@@ -6,7 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -41,6 +41,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,10 +51,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -63,23 +67,34 @@ import com.forenserecovery.android.domain.model.RecoveryItem
 import com.forenserecovery.android.domain.model.RecoveryType
 import com.forenserecovery.android.domain.model.ScanMode
 import com.forenserecovery.android.domain.model.ScanProfile
+import com.forenserecovery.android.monetization.MonetizationConfig
 import com.forenserecovery.android.permissions.PermissionHelper
 import com.forenserecovery.android.recovery.ShizukuAuthorizationState
 import com.forenserecovery.android.ui.viewmodel.MainViewModel
+import com.forenserecovery.android.ui.viewmodel.MonetizationViewModel
+import com.forenserecovery.android.ui.viewmodel.MonetizationUiState
 import java.io.File
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import android.app.Activity
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MainScreen(
-    viewModel: MainViewModel
+    viewModel: MainViewModel,
+    monetizationViewModel: MonetizationViewModel
 ) {
     val state by viewModel.ui.collectAsStateWithLifecycle()
+    val monetizationState by monetizationViewModel.ui.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val activity = context as? Activity
     val snackbar = remember { SnackbarHostState() }
     var showShizukuHelp by remember { mutableStateOf(false) }
     var showImagePreview by remember { mutableStateOf(false) }
     var previewImagePath by remember { mutableStateOf<String?>(null) }
-    val gridRows = remember(state.items) { state.items.chunked(2) }
+    var showPaywall by remember { mutableStateOf(false) }
+    val gridRows = remember(state.pagedItems) { state.pagedItems.chunked(2) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -118,8 +133,9 @@ fun MainScreen(
         runCatching {
             context.contentResolver.takePersistableUriPermission(uri, flags)
         }
-        viewModel.selectRestoreDestination(uri.toString())
-        viewModel.showMessage("Destino de restauración establecido: $uri")
+        val destinationLabel = resolveTreeDisplayName(context, uri)
+        viewModel.selectRestoreDestination(uri.toString(), destinationLabel)
+        viewModel.showMessage("Destino de restauración establecido: $destinationLabel")
     }
 
     LaunchedEffect(state.message) {
@@ -127,8 +143,23 @@ fun MainScreen(
         snackbar.showSnackbar(msg)
         viewModel.clearMessage()
     }
+    LaunchedEffect(monetizationState.message) {
+        val msg = monetizationState.message ?: return@LaunchedEffect
+        snackbar.showSnackbar(msg)
+        monetizationViewModel.clearMessage()
+    }
     LaunchedEffect(Unit) {
         viewModel.refreshShizukuState()
+        monetizationViewModel.startBilling()
+        monetizationViewModel.preloadAds()
+    }
+    LaunchedEffect(monetizationState.isPremiumUnlocked) {
+        val pendingMode = monetizationViewModel.consumePendingMode() ?: return@LaunchedEffect
+        viewModel.selectMode(pendingMode)
+        viewModel.showMessage("Premium activo. Modo ${pendingMode.name} habilitado.")
+    }
+    LaunchedEffect(monetizationState.showPaywall) {
+        showPaywall = monetizationState.showPaywall
     }
 
     Scaffold(
@@ -153,10 +184,30 @@ fun MainScreen(
                 ModeSelector(
                     selected = state.selectedMode,
                     onModeChanged = {
+                        val allowed = monetizationViewModel.ensureAccessOrShowPaywall(it)
+                        if (!allowed) {
+                            showPaywall = true
+                            return@ModeSelector
+                        }
                         viewModel.selectMode(it)
                         viewModel.showMessage(PermissionHelper.modeDescription(it))
                     }
                 )
+            }
+            item {
+                MonetizationStatusCard(
+                    isPremiumUnlocked = monetizationState.isPremiumUnlocked,
+                    hasAds = !monetizationState.isPremiumUnlocked,
+                    onOpenPaywall = { showPaywall = true },
+                    onRestore = monetizationViewModel::restorePurchases
+                )
+            }
+            if (!monetizationState.isPremiumUnlocked) {
+                item {
+                    BasicModeBannerAd(
+                        adUnitId = MonetizationConfig.BANNER_AD_UNIT_TEST
+                    )
+                }
             }
             item {
                 ScanProfileSelector(
@@ -172,13 +223,17 @@ fun MainScreen(
                     safTree = state.selectedSafTreeUri,
                     onSelectSafTree = { safTreeLauncher.launch(null) },
                     onShowShizukuHelp = { showShizukuHelp = true },
-                    onRequestShizukuPermission = viewModel::requestShizukuAuthorization
+                    onRequestShizukuPermission = viewModel::requestShizukuAuthorization,
+                    onRefreshShizukuState = viewModel::refreshShizukuState
                 )
             }
             item {
                 ScanControls(
                     state = state,
                     onStartScan = {
+                        if (state.selectedMode == ScanMode.BASIC && !monetizationState.isPremiumUnlocked) {
+                            monetizationViewModel.showInterstitial(activity) {}
+                        }
                         val required = PermissionHelper.requiredPermissions(state.selectedMode)
                         if (PermissionHelper.hasPermissions(context, required)) {
                             if (PermissionHelper.canUseManageExternalStorage(state.selectedMode) &&
@@ -215,6 +270,7 @@ fun MainScreen(
                 RestoreActionsCard(
                     state = state,
                     onSelectDestination = { restoreDestinationLauncher.launch(null) },
+                    onToggleSelectAllVisible = viewModel::toggleSelectAllVisible,
                     onRestoreSelected = {
                         if (state.selectedRestoreDestinationUri.isNullOrBlank()) {
                             restoreDestinationLauncher.launch(null)
@@ -257,9 +313,20 @@ fun MainScreen(
                     )
                 }
             }
+            item {
+                Text(
+                    "Mostrando ${state.pagedItems.size} de ${state.items.size} elementos",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
 
             if (state.viewMode == ItemViewMode.GRID) {
-                items(gridRows, key = { row -> row.firstOrNull()?.id ?: -1L }) { rowItems ->
+                itemsIndexed(gridRows, key = { _, row -> row.firstOrNull()?.id ?: -1L }) { index, rowItems ->
+                    if (index >= gridRows.lastIndex - 2 && state.pagedItems.size < state.items.size) {
+                        LaunchedEffect(index, state.pagedItems.size, state.items.size) {
+                            viewModel.loadMoreVisibleItems()
+                        }
+                    }
                     GridContent(
                         modifier = Modifier.fillMaxWidth(),
                         items = rowItems,
@@ -273,7 +340,12 @@ fun MainScreen(
                     )
                 }
             } else {
-                items(state.items, key = { it.id }) { rowItem ->
+                itemsIndexed(state.pagedItems, key = { _, item -> item.id }) { index, rowItem ->
+                    if (index >= state.pagedItems.lastIndex - 8 && state.pagedItems.size < state.items.size) {
+                        LaunchedEffect(index, state.pagedItems.size, state.items.size) {
+                            viewModel.loadMoreVisibleItems()
+                        }
+                    }
                     ListItemCard(
                         item = rowItem,
                         selectedIds = state.selectedRestoreIds,
@@ -339,6 +411,22 @@ fun MainScreen(
             onDismiss = { showImagePreview = false }
         )
     }
+    if (showPaywall) {
+        PremiumPaywallDialog(
+            state = monetizationState,
+            onDismiss = {
+                showPaywall = false
+                monetizationViewModel.dismissPaywall()
+            },
+            onBuy = { productId ->
+                val launched = monetizationViewModel.launchPurchase(activity, productId)
+                if (!launched) {
+                    viewModel.showMessage("No se pudo abrir la compra. Reintenta en unos segundos.")
+                }
+            },
+            onRestore = monetizationViewModel::restorePurchases
+        )
+    }
 }
 
 @Composable
@@ -379,6 +467,7 @@ private fun ModeSelector(
                                     ScanMode.BASIC -> "Básico"
                                     ScanMode.ADVANCED -> "Avanzado"
                                     ScanMode.FORENSIC -> "Forense"
+                                    ScanMode.ROOT -> "Root"
                                 }
                             )
                         }
@@ -428,12 +517,17 @@ private fun ForensicStatusCard(
     safTree: String?,
     onSelectSafTree: () -> Unit,
     onShowShizukuHelp: () -> Unit,
-    onRequestShizukuPermission: () -> Unit
+    onRequestShizukuPermission: () -> Unit,
+    onRefreshShizukuState: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Estado forense", fontWeight = FontWeight.Bold)
             Text(capability, style = MaterialTheme.typography.bodySmall)
+            Text(
+                "Estado Shizuku: ${formatShizukuState(shizukuState)}",
+                style = MaterialTheme.typography.bodySmall
+            )
             Text(
                 "SAF seleccionado: ${safTree ?: "ninguno"}",
                 style = MaterialTheme.typography.bodySmall,
@@ -464,6 +558,9 @@ private fun ForensicStatusCard(
                                 ShizukuAuthorizationState.Unavailable -> "Shizuku no disponible"
                             }
                         )
+                    }
+                    OutlinedButton(onClick = onRefreshShizukuState) {
+                        Text("Actualizar estado")
                     }
                 }
                 TextButton(onClick = onShowShizukuHelp) {
@@ -618,15 +715,17 @@ private fun FilterRow(
 private fun RestoreActionsCard(
     state: com.forenserecovery.android.ui.viewmodel.MainUiState,
     onSelectDestination: () -> Unit,
+    onToggleSelectAllVisible: () -> Unit,
     onRestoreSelected: () -> Unit,
     onRestoreAllVisible: () -> Unit,
     onClearSelection: () -> Unit
 ) {
+    val allVisibleSelected = state.items.isNotEmpty() && state.items.all { it.id in state.selectedRestoreIds }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Restauración", fontWeight = FontWeight.Bold)
             Text(
-                "Destino: ${state.selectedRestoreDestinationUri ?: "No seleccionado"}",
+                "Destino: ${state.selectedRestoreDestinationLabel ?: "No seleccionado"}",
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -641,6 +740,12 @@ private fun RestoreActionsCard(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(onClick = onSelectDestination) { Text("Elegir destino") }
+                OutlinedButton(
+                    onClick = onToggleSelectAllVisible,
+                    enabled = state.items.isNotEmpty() && !state.isRestoring
+                ) {
+                    Text(if (allVisibleSelected) "Deseleccionar todo" else "Seleccionar todo")
+                }
                 OutlinedButton(onClick = onRestoreSelected, enabled = state.selectedRestoreIds.isNotEmpty() && !state.isRestoring) {
                     Text("Restaurar seleccionadas")
                 }
@@ -705,6 +810,135 @@ private fun buildScanZoneLabel(
         return firstMatch
     }
     return parts.takeLast(2).joinToString("/").ifBlank { "Ruta activa" }
+}
+
+private fun formatShizukuState(state: ShizukuAuthorizationState): String = when (state) {
+    ShizukuAuthorizationState.Granted -> "Conectado y autorizado"
+    ShizukuAuthorizationState.Denied -> "Sin permiso en la app"
+    ShizukuAuthorizationState.NotInstalled -> "No instalado"
+    ShizukuAuthorizationState.ServiceUnavailable -> "Servicio no activo"
+    ShizukuAuthorizationState.Unavailable -> "No disponible"
+}
+
+private fun resolveTreeDisplayName(
+    context: android.content.Context,
+    uri: Uri
+): String {
+    val nameFromDocument = runCatching {
+        DocumentFile.fromTreeUri(context, uri)?.name
+    }.getOrNull()
+    if (!nameFromDocument.isNullOrBlank()) return nameFromDocument
+    val segment = uri.lastPathSegment?.substringAfterLast(':')
+    return if (segment.isNullOrBlank()) "Carpeta seleccionada" else segment
+}
+
+@Composable
+private fun MonetizationStatusCard(
+    isPremiumUnlocked: Boolean,
+    hasAds: Boolean,
+    onOpenPaywall: () -> Unit,
+    onRestore: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Plan actual", fontWeight = FontWeight.Bold)
+            Text(
+                if (isPremiumUnlocked) {
+                    "Premium activo: sin anuncios + modo avanzado/forense habilitado."
+                } else {
+                    "Básico gratis: con anuncios y acceso solo a funciones básicas."
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                if (hasAds) "Anuncios: activos" else "Anuncios: desactivados",
+                style = MaterialTheme.typography.bodySmall
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (!isPremiumUnlocked) {
+                    Button(onClick = onOpenPaywall) { Text("Pasar a Premium") }
+                }
+                OutlinedButton(onClick = onRestore) { Text("Restaurar compras") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BasicModeBannerAd(
+    adUnitId: String
+) {
+    val isPreview = LocalInspectionMode.current
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Publicidad (modo básico)", style = MaterialTheme.typography.bodySmall)
+            if (isPreview) {
+                Text("Banner preview", style = MaterialTheme.typography.bodySmall)
+            } else {
+                AndroidView(
+                    modifier = Modifier.fillMaxWidth(),
+                    factory = { ctx ->
+                        AdView(ctx).apply {
+                            setAdSize(AdSize.BANNER)
+                            this.adUnitId = adUnitId
+                            loadAd(AdRequest.Builder().build())
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PremiumPaywallDialog(
+    state: MonetizationUiState,
+    onDismiss: () -> Unit,
+    onBuy: (String) -> Unit,
+    onRestore: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("Cerrar") }
+        },
+        title = { Text("Premium Forense") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Desbloquea modo avanzado/forense y elimina anuncios.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (!state.isReady) {
+                    Text("Conectando a Google Play Billing...", style = MaterialTheme.typography.bodySmall)
+                }
+                if (state.products.isEmpty()) {
+                    Text(
+                        "Aún no hay productos cargados. Verifica los IDs en Play Console.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    state.products.forEachIndexed { index, product ->
+                        if (index > 0) HorizontalDivider()
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(product.title, fontWeight = FontWeight.SemiBold)
+                            Text(product.description, style = MaterialTheme.typography.bodySmall)
+                            Text(product.price, style = MaterialTheme.typography.bodySmall)
+                            Button(onClick = { onBuy(product.productId) }) {
+                                Text("Comprar")
+                            }
+                        }
+                    }
+                }
+                OutlinedButton(onClick = onRestore) {
+                    Text("Restaurar compras")
+                }
+            }
+        }
+    )
 }
 
 @Composable

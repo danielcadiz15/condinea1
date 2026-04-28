@@ -24,7 +24,7 @@ object PermissionHelper {
         }
         return when (mode) {
             ScanMode.BASIC -> mediaPermissions
-            ScanMode.ADVANCED, ScanMode.FORENSIC -> mediaPermissions
+            ScanMode.ADVANCED, ScanMode.FORENSIC, ScanMode.ROOT -> mediaPermissions
         }
     }
 
@@ -58,6 +58,7 @@ object PermissionHelper {
             ScanMode.BASIC -> "Modo básico: usa permisos estándar de medios (MediaStore)."
             ScanMode.ADVANCED -> "Modo avanzado: requiere acceso ampliado para explorar más rutas compartidas."
             ScanMode.FORENSIC -> "Modo forense: añade compatibilidad opcional con Shizuku/ADB, según disponibilidad."
+            ScanMode.ROOT -> "Modo root: reservado para futuras capacidades con acceso root autorizado."
         }
     }
 }

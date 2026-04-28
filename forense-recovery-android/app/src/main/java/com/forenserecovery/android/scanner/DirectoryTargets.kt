@@ -27,7 +27,7 @@ object DirectoryTargets {
 
         val all = when (mode) {
             ScanMode.BASIC -> baseDirs
-            ScanMode.ADVANCED, ScanMode.FORENSIC -> baseDirs + advancedOnly
+            ScanMode.ADVANCED, ScanMode.FORENSIC, ScanMode.ROOT -> baseDirs + advancedOnly
         }
         return all.distinctBy { it.absolutePath }
     }
