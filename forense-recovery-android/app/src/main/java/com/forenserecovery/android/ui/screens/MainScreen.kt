@@ -6,8 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +18,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -77,6 +79,7 @@ fun MainScreen(
     var showShizukuHelp by remember { mutableStateOf(false) }
     var showImagePreview by remember { mutableStateOf(false) }
     var previewImagePath by remember { mutableStateOf<String?>(null) }
+    val gridRows = remember(state.items) { state.items.chunked(2) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -124,6 +127,9 @@ fun MainScreen(
         snackbar.showSnackbar(msg)
         viewModel.clearMessage()
     }
+    LaunchedEffect(Unit) {
+        viewModel.refreshShizukuState()
+    }
 
     Scaffold(
         topBar = {
@@ -133,133 +139,152 @@ fun MainScreen(
         },
         snackbarHost = { SnackbarHost(hostState = snackbar) }
     ) { innerPadding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(12.dp)
-                .verticalScroll(rememberScrollState()),
+                .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            LegalNoticeCard()
-            ModeSelector(
-                selected = state.selectedMode,
-                onModeChanged = {
-                    viewModel.selectMode(it)
-                    viewModel.showMessage(PermissionHelper.modeDescription(it))
-                }
-            )
-            ScanProfileSelector(
-                selected = state.selectedScanProfile,
-                onSelected = viewModel::selectScanProfile
-            )
-            ForensicStatusCard(
-                mode = state.selectedMode,
-                capability = state.forensicCapability,
-                shizukuState = state.shizukuState,
-                safTree = state.selectedSafTreeUri,
-                onSelectSafTree = { safTreeLauncher.launch(null) },
-                onShowShizukuHelp = { showShizukuHelp = true },
-                onRequestShizukuPermission = viewModel::requestShizukuAuthorization
-            )
-            ScanControls(
-                state = state,
-                onStartScan = {
-                    val required = PermissionHelper.requiredPermissions(state.selectedMode)
-                    if (PermissionHelper.hasPermissions(context, required)) {
-                        if (PermissionHelper.canUseManageExternalStorage(state.selectedMode) &&
-                            !PermissionHelper.hasManageExternalStorage()
-                        ) {
-                            val intent = PermissionHelper.buildManageAllFilesAccessIntent(context)
-                            context.startActivity(intent)
-                            viewModel.showMessage(
-                                "Concede All Files Access y vuelve a iniciar el escaneo avanzado."
-                            )
-                        } else {
-                            viewModel.startScan()
-                        }
-                    } else {
-                        permissionLauncher.launch(required)
-                    }
-                },
-                onPauseResume = {
-                    if (state.progress.isPaused) viewModel.resumeScan() else viewModel.pauseScan()
-                },
-                onCancelScan = viewModel::cancelScan
-            )
-            FilterRow(
-                selectedFilter = state.selectedFilter,
-                onFilterChanged = viewModel::selectFilter,
-                selectedFolder = state.selectedSourceFolder,
-                availableFolders = state.availableSourceFolders,
-                onFolderChanged = viewModel::selectSourceFolder
-            )
-            RestoreActionsCard(
-                state = state,
-                onSelectDestination = { restoreDestinationLauncher.launch(null) },
-                onRestoreSelected = {
-                    if (state.selectedRestoreDestinationUri.isNullOrBlank()) {
-                        restoreDestinationLauncher.launch(null)
-                    } else {
-                        viewModel.restoreSelected()
-                    }
-                },
-                onRestoreAllVisible = {
-                    if (state.selectedRestoreDestinationUri.isNullOrBlank()) {
-                        restoreDestinationLauncher.launch(null)
-                    } else {
-                        viewModel.restoreAllVisible()
-                    }
-                },
-                onClearSelection = viewModel::clearSelection
-            )
-            ExportRow(
-                onExportAll = viewModel::exportAll,
-                onClearDatabase = viewModel::clearDatabase
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Hallazgos: ${state.items.size}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                AssistChip(
-                    onClick = viewModel::toggleViewMode,
-                    label = {
-                        Text(if (state.viewMode == ItemViewMode.GRID) "Vista: Grid" else "Vista: Lista")
+            item {
+                LegalNoticeCard()
+            }
+            item {
+                ModeSelector(
+                    selected = state.selectedMode,
+                    onModeChanged = {
+                        viewModel.selectMode(it)
+                        viewModel.showMessage(PermissionHelper.modeDescription(it))
                     }
                 )
             }
+            item {
+                ScanProfileSelector(
+                    selected = state.selectedScanProfile,
+                    onSelected = viewModel::selectScanProfile
+                )
+            }
+            item {
+                ForensicStatusCard(
+                    mode = state.selectedMode,
+                    capability = state.forensicCapability,
+                    shizukuState = state.shizukuState,
+                    safTree = state.selectedSafTreeUri,
+                    onSelectSafTree = { safTreeLauncher.launch(null) },
+                    onShowShizukuHelp = { showShizukuHelp = true },
+                    onRequestShizukuPermission = viewModel::requestShizukuAuthorization
+                )
+            }
+            item {
+                ScanControls(
+                    state = state,
+                    onStartScan = {
+                        val required = PermissionHelper.requiredPermissions(state.selectedMode)
+                        if (PermissionHelper.hasPermissions(context, required)) {
+                            if (PermissionHelper.canUseManageExternalStorage(state.selectedMode) &&
+                                !PermissionHelper.hasManageExternalStorage()
+                            ) {
+                                val intent = PermissionHelper.buildManageAllFilesAccessIntent(context)
+                                context.startActivity(intent)
+                                viewModel.showMessage(
+                                    "Concede All Files Access y vuelve a iniciar el escaneo avanzado."
+                                )
+                            } else {
+                                viewModel.startScan()
+                            }
+                        } else {
+                            permissionLauncher.launch(required)
+                        }
+                    },
+                    onPauseResume = {
+                        if (state.progress.isPaused) viewModel.resumeScan() else viewModel.pauseScan()
+                    },
+                    onCancelScan = viewModel::cancelScan
+                )
+            }
+            item {
+                FilterRow(
+                    selectedFilter = state.selectedFilter,
+                    onFilterChanged = viewModel::selectFilter,
+                    selectedFolder = state.selectedSourceFolder,
+                    availableFolders = state.availableSourceFolders,
+                    onFolderChanged = viewModel::selectSourceFolder
+                )
+            }
+            item {
+                RestoreActionsCard(
+                    state = state,
+                    onSelectDestination = { restoreDestinationLauncher.launch(null) },
+                    onRestoreSelected = {
+                        if (state.selectedRestoreDestinationUri.isNullOrBlank()) {
+                            restoreDestinationLauncher.launch(null)
+                        } else {
+                            viewModel.restoreSelected()
+                        }
+                    },
+                    onRestoreAllVisible = {
+                        if (state.selectedRestoreDestinationUri.isNullOrBlank()) {
+                            restoreDestinationLauncher.launch(null)
+                        } else {
+                            viewModel.restoreAllVisible()
+                        }
+                    },
+                    onClearSelection = viewModel::clearSelection
+                )
+            }
+            item {
+                ExportRow(
+                    onExportAll = viewModel::exportAll,
+                    onClearDatabase = viewModel::clearDatabase
+                )
+            }
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Hallazgos: ${state.items.size}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    AssistChip(
+                        onClick = viewModel::toggleViewMode,
+                        label = {
+                            Text(if (state.viewMode == ItemViewMode.GRID) "Vista: Grid" else "Vista: Lista")
+                        }
+                    )
+                }
+            }
 
             if (state.viewMode == ItemViewMode.GRID) {
-                GridContent(
-                    modifier = Modifier.fillMaxWidth(),
-                    items = state.items,
-                    selectedIds = state.selectedRestoreIds,
-                    onSelectItem = { viewModel.selectItem(it) },
-                    onToggleSelection = { viewModel.toggleItemSelection(it) },
-                    onOpenPreview = { path ->
-                        previewImagePath = path
-                        showImagePreview = true
-                    }
-                )
+                items(gridRows, key = { row -> row.firstOrNull()?.id ?: -1L }) { rowItems ->
+                    GridContent(
+                        modifier = Modifier.fillMaxWidth(),
+                        items = rowItems,
+                        selectedIds = state.selectedRestoreIds,
+                        onSelectItem = { viewModel.selectItem(it) },
+                        onToggleSelection = { viewModel.toggleItemSelection(it) },
+                        onOpenPreview = { path ->
+                            previewImagePath = path
+                            showImagePreview = true
+                        }
+                    )
+                }
             } else {
-                ListContent(
-                    modifier = Modifier.fillMaxWidth(),
-                    items = state.items,
-                    selectedIds = state.selectedRestoreIds,
-                    onSelectItem = { viewModel.selectItem(it) },
-                    onToggleSelection = { viewModel.toggleItemSelection(it) },
-                    onOpenPreview = { path ->
-                        previewImagePath = path
-                        showImagePreview = true
-                    }
-                )
+                items(state.items, key = { it.id }) { rowItem ->
+                    ListItemCard(
+                        item = rowItem,
+                        selectedIds = state.selectedRestoreIds,
+                        onSelectItem = { viewModel.selectItem(it) },
+                        onToggleSelection = { viewModel.toggleItemSelection(it) },
+                        onOpenPreview = { path ->
+                            previewImagePath = path
+                            showImagePreview = true
+                        }
+                    )
+                }
             }
         }
     }
@@ -772,52 +797,44 @@ private fun GridContent(
 }
 
 @Composable
-private fun ListContent(
-    modifier: Modifier = Modifier,
-    items: List<RecoveryItem>,
+private fun ListItemCard(
+    item: RecoveryItem,
     selectedIds: Set<Long>,
     onSelectItem: (RecoveryItem) -> Unit,
     onToggleSelection: (Long) -> Unit,
     onOpenPreview: (String) -> Unit
 ) {
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items.forEach { item ->
-            Card(modifier = Modifier.fillMaxWidth().clickable { onSelectItem(item) }) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        Checkbox(
-                            checked = item.id in selectedIds,
-                            onCheckedChange = { onToggleSelection(item.id) }
-                        )
-                    }
-                    Text("${item.type} | ${item.status}", fontWeight = FontWeight.SemiBold)
-                    val preview = item.recoveredPath ?: item.originalPath
-                    if (item.type == RecoveryType.IMAGE && !preview.isNullOrBlank()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(preview)
-                                .size(260, 260)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = null,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(96.dp)
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable { onOpenPreview(preview) }
-                        )
-                    }
-                    Text(item.mimeType ?: "MIME desconocido", style = MaterialTheme.typography.bodySmall)
-                    Text(item.originalPath ?: "-", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("SHA: ${item.sha256 ?: "N/A"}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+    Card(modifier = Modifier.fillMaxWidth().clickable { onSelectItem(item) }) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Checkbox(
+                    checked = item.id in selectedIds,
+                    onCheckedChange = { onToggleSelection(item.id) }
+                )
             }
+            Text("${item.type} | ${item.status}", fontWeight = FontWeight.SemiBold)
+            val preview = item.recoveredPath ?: item.originalPath
+            if (item.type == RecoveryType.IMAGE && !preview.isNullOrBlank()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(preview)
+                        .size(260, 260)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(96.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { onOpenPreview(preview) }
+                )
+            }
+            Text(item.mimeType ?: "MIME desconocido", style = MaterialTheme.typography.bodySmall)
+            Text(item.originalPath ?: "-", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("SHA: ${item.sha256 ?: "N/A"}", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

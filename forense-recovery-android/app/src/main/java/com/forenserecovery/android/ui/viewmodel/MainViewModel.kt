@@ -37,6 +37,8 @@ data class MainUiState(
     val workerState: ScanWorkerState = ScanWorkerState.Idle,
     val allItems: List<RecoveryItem> = emptyList(),
     val items: List<RecoveryItem> = emptyList(),
+    val pagedItems: List<RecoveryItem> = emptyList(),
+    val visibleItemsTarget: Int = DEFAULT_VISIBLE_PAGE_SIZE,
     val selectedRestoreIds: Set<Long> = emptySet(),
     val selectedRestoreDestinationUri: String? = null,
     val isRestoring: Boolean = false,
@@ -47,6 +49,8 @@ data class MainUiState(
     val shizukuState: ShizukuAuthorizationState = ShizukuAuthorizationState.Unavailable,
     val message: String? = null
 )
+
+private const val DEFAULT_VISIBLE_PAGE_SIZE = 80
 
 class MainViewModel(
     application: Application
@@ -90,6 +94,9 @@ class MainViewModel(
                     itemFilter = currentState.selectedFilter,
                     sourceFolder = effectiveFolder
                 )
+                val targetVisible = currentState.visibleItemsTarget
+                    .coerceAtLeast(DEFAULT_VISIBLE_PAGE_SIZE)
+                    .coerceAtMost(filtered.size.coerceAtLeast(DEFAULT_VISIBLE_PAGE_SIZE))
                 val selected = currentState.selectedItem
                 val updatedSelected = selected?.let { sel ->
                     filtered.firstOrNull { it.id == sel.id }
@@ -98,6 +105,8 @@ class MainViewModel(
                     it.copy(
                         allItems = allItems,
                         items = filtered,
+                        pagedItems = filtered.take(targetVisible),
+                        visibleItemsTarget = targetVisible,
                         selectedSourceFolder = effectiveFolder,
                         availableSourceFolders = folders,
                         selectedItem = updatedSelected
@@ -182,11 +191,7 @@ class MainViewModel(
     }
 
     fun selectMode(mode: ScanMode) {
-        val capability = if (mode == ScanMode.FORENSIC) {
-            ForensicCapabilityDetector.describeForensicCapability(getApplication())
-        } else {
-            _ui.value.forensicCapability
-        }
+        val capability = ForensicCapabilityDetector.describeForensicCapability(getApplication())
         _ui.update {
             it.copy(
                 selectedMode = mode,
@@ -204,6 +209,10 @@ class MainViewModel(
         _ui.update { it.copy(selectedSafTreeUri = uri) }
     }
 
+    fun refreshShizukuState() {
+        refreshForensicStatus()
+    }
+
     fun selectFilter(filter: ItemFilter) {
         val state = _ui.value
         val filtered = applyFilters(
@@ -211,7 +220,14 @@ class MainViewModel(
             itemFilter = filter,
             sourceFolder = state.selectedSourceFolder
         )
-        _ui.update { it.copy(selectedFilter = filter, items = filtered) }
+        _ui.update {
+            it.copy(
+                selectedFilter = filter,
+                items = filtered,
+                visibleItemsTarget = DEFAULT_VISIBLE_PAGE_SIZE,
+                pagedItems = filtered.take(DEFAULT_VISIBLE_PAGE_SIZE)
+            )
+        }
     }
 
     fun selectSourceFolder(folder: String) {
@@ -221,7 +237,29 @@ class MainViewModel(
             itemFilter = state.selectedFilter,
             sourceFolder = folder
         )
-        _ui.update { it.copy(selectedSourceFolder = folder, items = filtered) }
+        _ui.update {
+            it.copy(
+                selectedSourceFolder = folder,
+                items = filtered,
+                visibleItemsTarget = DEFAULT_VISIBLE_PAGE_SIZE,
+                pagedItems = filtered.take(DEFAULT_VISIBLE_PAGE_SIZE)
+            )
+        }
+    }
+
+    fun loadMoreVisibleItems() {
+        _ui.update { state ->
+            if (state.pagedItems.size >= state.items.size) {
+                state
+            } else {
+                val nextTarget = (state.visibleItemsTarget + DEFAULT_VISIBLE_PAGE_SIZE)
+                    .coerceAtMost(state.items.size)
+                state.copy(
+                    visibleItemsTarget = nextTarget,
+                    pagedItems = state.items.take(nextTarget)
+                )
+            }
+        }
     }
 
     fun toggleItemSelection(itemId: Long) {
@@ -355,6 +393,8 @@ class MainViewModel(
                     selectedItem = null,
                     allItems = emptyList(),
                     items = emptyList(),
+                    pagedItems = emptyList(),
+                    visibleItemsTarget = DEFAULT_VISIBLE_PAGE_SIZE,
                     selectedSafTreeUri = null,
                     selectedSourceFolder = "Todas",
                     availableSourceFolders = listOf("Todas"),
@@ -374,13 +414,7 @@ class MainViewModel(
     fun requestShizukuAuthorization() {
         viewModelScope.launch {
             val result = shizukuBridgeManager.requestAuthorization()
-            val refreshedState = shizukuBridgeManager.currentState()
-            _ui.update {
-                it.copy(
-                    shizukuState = refreshedState,
-                    forensicCapability = ForensicCapabilityDetector.describeForensicCapability(getApplication())
-                )
-            }
+            refreshForensicStatus()
             val feedback = when (result) {
                 ShizukuAuthorizationState.Granted -> "Shizuku autorizado correctamente."
                 ShizukuAuthorizationState.Denied -> "Permiso de Shizuku denegado. Puedes reintentar desde la ayuda."
@@ -389,6 +423,15 @@ class MainViewModel(
                 ShizukuAuthorizationState.Unavailable -> "Shizuku no disponible en este entorno."
             }
             _ui.update { it.copy(message = feedback) }
+        }
+    }
+
+    fun refreshForensicStatus() {
+        _ui.update {
+            it.copy(
+                shizukuState = shizukuBridgeManager.currentState(),
+                forensicCapability = ForensicCapabilityDetector.describeForensicCapability(getApplication())
+            )
         }
     }
 

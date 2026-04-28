@@ -72,7 +72,9 @@ class ShizukuBridgeManager(
     }
 
     fun isServiceRunning(): Boolean {
-        return runCatching { Shizuku.pingBinder() }.getOrDefault(false)
+        return runCatching {
+            Shizuku.pingBinder() && Shizuku.getVersion() >= 10
+        }.getOrDefault(false)
     }
 
     fun isPermissionGranted(): Boolean {
