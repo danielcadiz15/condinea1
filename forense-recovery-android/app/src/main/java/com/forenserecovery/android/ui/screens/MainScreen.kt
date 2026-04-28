@@ -672,6 +672,7 @@ private fun ShizukuHelpDialog(onDismiss: () -> Unit) {
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GridContent(
     modifier: Modifier = Modifier,
