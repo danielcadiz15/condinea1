@@ -131,7 +131,7 @@ class ForensicEngine(
             val original = hit.sourcePath?.let(::File)
             val isFileReadable = original?.exists() == true && original.canRead() && original.isFile
             val signature = when {
-                isFileReadable -> detectByHeader(original)
+                isFileReadable -> detectByHeader(original!!)
                 else -> MagicNumberDetector.inferFromPath(hit.sourcePath ?: hit.displayName)
             }
 
