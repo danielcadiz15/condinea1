@@ -66,7 +66,7 @@ class ForensicEngine(
                 ScanProgress(
                     scanned = scanned,
                     discovered = discovered,
-                    expectedTotal = (scanned + estimateRemaining).coerceAtLeast(scanned + 1),
+                    expectedTotal = null,
                     currentPath = path,
                     stage = stage,
                     isRunning = running,
