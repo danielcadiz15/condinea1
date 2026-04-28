@@ -1,7 +1,6 @@
 package com.forenserecovery.android.scanner
 
 import android.content.Context
-import android.content.Context
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import androidx.exifinterface.media.ExifInterface
