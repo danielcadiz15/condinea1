@@ -6,6 +6,8 @@ import java.io.File
 
 data class ForensicCapabilities(
     val shizukuInstalled: Boolean,
+    val shizukuPermissionGranted: Boolean,
+    val shizukuServiceRunning: Boolean,
     val adbExecutableVisible: Boolean
 ) {
     val hasAnyForensicBridge: Boolean
@@ -17,9 +19,14 @@ object ForensicCapabilityDetector {
 
     fun detect(context: Context): ForensicCapabilities {
         val shizukuInstalled = isShizukuInstalled(context)
+        val shizukuBridge = ShizukuBridgeManager(context)
+        val shizukuPermissionGranted = shizukuBridge.isPermissionGranted()
+        val shizukuServiceRunning = shizukuBridge.isServiceRunning()
         val adbExecutableVisible = isAdbBinaryVisible()
         return ForensicCapabilities(
             shizukuInstalled = shizukuInstalled,
+            shizukuPermissionGranted = shizukuPermissionGranted,
+            shizukuServiceRunning = shizukuServiceRunning,
             adbExecutableVisible = adbExecutableVisible
         )
     }
@@ -50,11 +57,14 @@ object ForensicCapabilityDetector {
     fun describeForensicCapability(context: Context): String {
         val detected = detect(context)
         return when {
-            detected.shizukuInstalled && detected.adbExecutableVisible ->
-                "Shizuku detectado y binario ADB visible. Modo forense ampliado disponible."
+            detected.shizukuInstalled && detected.shizukuServiceRunning && detected.shizukuPermissionGranted ->
+                "Shizuku detectado, servicio activo y permiso concedido. Integración forense lista."
+
+            detected.shizukuInstalled && detected.shizukuServiceRunning ->
+                "Shizuku detectado y activo, falta conceder permiso a esta app."
 
             detected.shizukuInstalled ->
-                "Shizuku detectado. Puedes habilitar puente forense opcional."
+                "Shizuku detectado, pero el servicio aún no está activo."
 
             detected.adbExecutableVisible ->
                 "ADB visible en el sistema. Integración forense limitada disponible."

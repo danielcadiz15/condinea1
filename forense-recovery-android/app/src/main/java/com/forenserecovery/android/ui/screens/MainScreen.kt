@@ -35,6 +35,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Surface
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Checkbox
@@ -53,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.forenserecovery.android.domain.model.ItemFilter
 import com.forenserecovery.android.domain.model.ItemViewMode
 import com.forenserecovery.android.domain.model.RecoveryItem
@@ -60,6 +62,7 @@ import com.forenserecovery.android.domain.model.RecoveryType
 import com.forenserecovery.android.domain.model.ScanMode
 import com.forenserecovery.android.domain.model.ScanProfile
 import com.forenserecovery.android.permissions.PermissionHelper
+import com.forenserecovery.android.recovery.ShizukuAuthorizationState
 import com.forenserecovery.android.ui.viewmodel.MainViewModel
 import java.io.File
 
@@ -72,6 +75,8 @@ fun MainScreen(
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     var showShizukuHelp by remember { mutableStateOf(false) }
+    var showImagePreview by remember { mutableStateOf(false) }
+    var previewImagePath by remember { mutableStateOf<String?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -151,9 +156,11 @@ fun MainScreen(
             ForensicStatusCard(
                 mode = state.selectedMode,
                 capability = state.forensicCapability,
+                shizukuState = state.shizukuState,
                 safTree = state.selectedSafTreeUri,
                 onSelectSafTree = { safTreeLauncher.launch(null) },
-                onShowShizukuHelp = { showShizukuHelp = true }
+                onShowShizukuHelp = { showShizukuHelp = true },
+                onRequestShizukuPermission = viewModel::requestShizukuAuthorization
             )
             ScanControls(
                 state = state,
@@ -235,7 +242,11 @@ fun MainScreen(
                     items = state.items,
                     selectedIds = state.selectedRestoreIds,
                     onSelectItem = { viewModel.selectItem(it) },
-                    onToggleSelection = { viewModel.toggleItemSelection(it) }
+                    onToggleSelection = { viewModel.toggleItemSelection(it) },
+                    onOpenPreview = { path ->
+                        previewImagePath = path
+                        showImagePreview = true
+                    }
                 )
             } else {
                 ListContent(
@@ -243,7 +254,11 @@ fun MainScreen(
                     items = state.items,
                     selectedIds = state.selectedRestoreIds,
                     onSelectItem = { viewModel.selectItem(it) },
-                    onToggleSelection = { viewModel.toggleItemSelection(it) }
+                    onToggleSelection = { viewModel.toggleItemSelection(it) },
+                    onOpenPreview = { path ->
+                        previewImagePath = path
+                        showImagePreview = true
+                    }
                 )
             }
         }
@@ -292,6 +307,12 @@ fun MainScreen(
 
     if (showShizukuHelp) {
         ShizukuHelpDialog(onDismiss = { showShizukuHelp = false })
+    }
+    if (showImagePreview && !previewImagePath.isNullOrBlank()) {
+        ImagePreviewDialog(
+            imagePath = previewImagePath!!,
+            onDismiss = { showImagePreview = false }
+        )
     }
 }
 
@@ -378,9 +399,11 @@ private fun ScanProfileSelector(
 private fun ForensicStatusCard(
     mode: ScanMode,
     capability: String,
+    shizukuState: ShizukuAuthorizationState,
     safTree: String?,
     onSelectSafTree: () -> Unit,
-    onShowShizukuHelp: () -> Unit
+    onShowShizukuHelp: () -> Unit,
+    onRequestShizukuPermission: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -400,6 +423,22 @@ private fun ForensicStatusCard(
                 if (mode == ScanMode.FORENSIC || mode == ScanMode.ADVANCED) {
                     OutlinedButton(onClick = onSelectSafTree) {
                         Text("Seleccionar carpeta SAF")
+                    }
+                }
+                if (mode == ScanMode.FORENSIC) {
+                    Button(
+                        onClick = onRequestShizukuPermission,
+                        enabled = shizukuState != ShizukuAuthorizationState.Granted
+                    ) {
+                        Text(
+                            when (shizukuState) {
+                                ShizukuAuthorizationState.Granted -> "Shizuku autorizado"
+                                ShizukuAuthorizationState.NotInstalled -> "Instalar Shizuku"
+                                ShizukuAuthorizationState.ServiceUnavailable -> "Activar servicio Shizuku"
+                                ShizukuAuthorizationState.Denied -> "Reintentar permiso Shizuku"
+                                ShizukuAuthorizationState.Unavailable -> "Shizuku no disponible"
+                            }
+                        )
                     }
                 }
                 TextButton(onClick = onShowShizukuHelp) {
@@ -679,7 +718,8 @@ private fun GridContent(
     items: List<RecoveryItem>,
     selectedIds: Set<Long>,
     onSelectItem: (RecoveryItem) -> Unit,
-    onToggleSelection: (Long) -> Unit
+    onToggleSelection: (Long) -> Unit,
+    onOpenPreview: (String) -> Unit
 ) {
     FlowRow(
         modifier = modifier.fillMaxWidth(),
@@ -689,7 +729,7 @@ private fun GridContent(
         items.forEach { item ->
             Card(
                 modifier = Modifier
-                    .widthIn(min = 140.dp, max = 220.dp)
+                    .widthIn(min = 110.dp, max = 160.dp)
                     .clickable { onSelectItem(item) }
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
@@ -705,12 +745,17 @@ private fun GridContent(
                     val preview = item.recoveredPath ?: item.originalPath
                     if (item.type.name == "IMAGE" && !preview.isNullOrBlank()) {
                         AsyncImage(
-                            model = preview,
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(preview)
+                                .size(180, 180)
+                                .crossfade(true)
+                                .build(),
                             contentDescription = null,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(100.dp)
+                                .height(72.dp)
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable { onOpenPreview(preview) }
                         )
                     }
                     Text(item.type.name, fontWeight = FontWeight.SemiBold)
@@ -732,7 +777,8 @@ private fun ListContent(
     items: List<RecoveryItem>,
     selectedIds: Set<Long>,
     onSelectItem: (RecoveryItem) -> Unit,
-    onToggleSelection: (Long) -> Unit
+    onToggleSelection: (Long) -> Unit,
+    onOpenPreview: (String) -> Unit
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -751,6 +797,22 @@ private fun ListContent(
                         )
                     }
                     Text("${item.type} | ${item.status}", fontWeight = FontWeight.SemiBold)
+                    val preview = item.recoveredPath ?: item.originalPath
+                    if (item.type == RecoveryType.IMAGE && !preview.isNullOrBlank()) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(preview)
+                                .size(260, 260)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(96.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable { onOpenPreview(preview) }
+                        )
+                    }
                     Text(item.mimeType ?: "MIME desconocido", style = MaterialTheme.typography.bodySmall)
                     Text(item.originalPath ?: "-", maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("SHA: ${item.sha256 ?: "N/A"}", maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -758,6 +820,33 @@ private fun ListContent(
             }
         }
     }
+}
+
+@Composable
+private fun ImagePreviewDialog(
+    imagePath: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { Button(onClick = onDismiss) { Text("Cerrar") } },
+        title = { Text("Vista previa") },
+        text = {
+            Surface(modifier = Modifier.fillMaxWidth()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(imagePath)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(320.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                )
+            }
+        }
+    )
 }
 
 @Composable

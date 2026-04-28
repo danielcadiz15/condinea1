@@ -46,6 +46,11 @@ class ForensicEngine(
         val profile = runCatching {
             ScanProfile.valueOf(ScanRuntimeControl.getScanProfile() ?: ScanProfile.BALANCED.name)
         }.getOrDefault(ScanProfile.BALANCED)
+        val tickEvery = when (profile) {
+            ScanProfile.QUICK -> 100
+            ScanProfile.BALANCED -> 40
+            ScanProfile.DEEP -> 20
+        }
         controlCenter.resume()
         var scanned = 0
         var discovered = 0
@@ -61,7 +66,7 @@ class ForensicEngine(
                 ScanProgress(
                     scanned = scanned,
                     discovered = discovered,
-                    expectedTotal = null,
+                    expectedTotal = (scanned + estimateRemaining).coerceAtLeast(scanned + 1),
                     currentPath = path,
                     stage = stage,
                     isRunning = running,
@@ -79,7 +84,9 @@ class ForensicEngine(
                 currentCoroutineContext().ensureActive()
                 if (controlCenter.isCancelled()) return@scan
                 scanned += 1
-                tick(stage = "Escaneando MediaStore", path = current)
+                if (scanned <= 20 || scanned % tickEvery == 0) {
+                    tick(stage = "Escaneando MediaStore", path = current)
+                }
             }
 
             for (hit in mediaHits) {
@@ -96,7 +103,9 @@ class ForensicEngine(
                     currentCoroutineContext().ensureActive()
                     if (controlCenter.isCancelled()) return@scan
                     scanned += 1
-                    tick(stage = "Escaneando almacenamiento compartido", path = current.absolutePath)
+                    if (scanned <= 20 || scanned % tickEvery == 0) {
+                        tick(stage = "Escaneando almacenamiento compartido", path = current.absolutePath)
+                    }
                 }
 
                 for (hit in storageHits) {
@@ -117,7 +126,9 @@ class ForensicEngine(
                     currentCoroutineContext().ensureActive()
                     if (!controlCenter.isCancelled()) {
                         scanned += 1
-                        tick(stage = "Escaneando árbol SAF", path = currentPath)
+                        if (scanned <= 20 || scanned % tickEvery == 0) {
+                            tick(stage = "Escaneando árbol SAF", path = currentPath)
+                        }
                     }
                 }
                 for (hit in safHits) {

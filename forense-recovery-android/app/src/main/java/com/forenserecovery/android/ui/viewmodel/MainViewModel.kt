@@ -18,6 +18,8 @@ import com.forenserecovery.android.recovery.ScanCoordinator
 import com.forenserecovery.android.recovery.ScanRuntimeControl
 import com.forenserecovery.android.recovery.ScanWorker
 import com.forenserecovery.android.recovery.ScanWorkerState
+import com.forenserecovery.android.recovery.ShizukuAuthorizationState
+import com.forenserecovery.android.recovery.ShizukuBridgeManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -42,6 +44,7 @@ data class MainUiState(
     val selectedItem: RecoveryItem? = null,
     val lastExportPath: String? = null,
     val forensicCapability: String = "No evaluado",
+    val shizukuState: ShizukuAuthorizationState = ShizukuAuthorizationState.Unavailable,
     val message: String? = null
 )
 
@@ -54,13 +57,17 @@ class MainViewModel(
     private val scanCoordinator = ScanCoordinator(application)
     private val exportManager = ExportManager(application)
     private val restoreManager = RestoreManager(application)
+    private val shizukuBridgeManager = ShizukuBridgeManager(application)
 
     private val _ui = MutableStateFlow(MainUiState())
     val ui: StateFlow<MainUiState> = _ui
 
     init {
         _ui.update {
-            it.copy(forensicCapability = ForensicCapabilityDetector.describeForensicCapability(getApplication()))
+            it.copy(
+                forensicCapability = ForensicCapabilityDetector.describeForensicCapability(getApplication()),
+                shizukuState = shizukuBridgeManager.currentState()
+            )
         }
         observeItems()
         observeWorkerState()
@@ -180,7 +187,13 @@ class MainViewModel(
         } else {
             _ui.value.forensicCapability
         }
-        _ui.update { it.copy(selectedMode = mode, forensicCapability = capability) }
+        _ui.update {
+            it.copy(
+                selectedMode = mode,
+                forensicCapability = capability,
+                shizukuState = shizukuBridgeManager.currentState()
+            )
+        }
     }
 
     fun selectScanProfile(profile: ScanProfile) {
@@ -356,6 +369,27 @@ class MainViewModel(
 
     fun clearMessage() {
         _ui.update { it.copy(message = null) }
+    }
+
+    fun requestShizukuAuthorization() {
+        viewModelScope.launch {
+            val result = shizukuBridgeManager.requestAuthorization()
+            val refreshedState = shizukuBridgeManager.currentState()
+            _ui.update {
+                it.copy(
+                    shizukuState = refreshedState,
+                    forensicCapability = ForensicCapabilityDetector.describeForensicCapability(getApplication())
+                )
+            }
+            val feedback = when (result) {
+                ShizukuAuthorizationState.Granted -> "Shizuku autorizado correctamente."
+                ShizukuAuthorizationState.Denied -> "Permiso de Shizuku denegado. Puedes reintentar desde la ayuda."
+                ShizukuAuthorizationState.NotInstalled -> "Shizuku no está instalado en este dispositivo."
+                ShizukuAuthorizationState.ServiceUnavailable -> "Servicio de Shizuku no activo. Inícialo y vuelve a intentar."
+                ShizukuAuthorizationState.Unavailable -> "Shizuku no disponible en este entorno."
+            }
+            _ui.update { it.copy(message = feedback) }
+        }
     }
 
     fun showMessage(message: String) {
