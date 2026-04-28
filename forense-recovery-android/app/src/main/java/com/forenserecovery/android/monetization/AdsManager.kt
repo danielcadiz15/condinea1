@@ -2,6 +2,7 @@ package com.forenserecovery.android.monetization
 
 import android.app.Activity
 import android.app.Application
+import android.util.Log
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.MobileAds
@@ -11,27 +12,37 @@ import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 class AdsManager(
     private val application: Application
 ) {
+    private val tag = "AdsManager"
     private var interstitialAd: InterstitialAd? = null
     private var loaded = false
 
     fun initialize() {
-        MobileAds.initialize(application)
-        preloadInterstitial()
+        runCatching {
+            MobileAds.initialize(application)
+        }.onSuccess {
+            preloadInterstitial()
+        }.onFailure { error ->
+            Log.w(tag, "No se pudo inicializar AdMob", error)
+        }
     }
 
     fun preloadInterstitial() {
         if (loaded) return
-        InterstitialAd.load(
-            application,
-            TEST_INTERSTITIAL_AD_UNIT,
-            AdRequest.Builder().build(),
-            object : InterstitialAdLoadCallback() {
-                override fun onAdLoaded(ad: InterstitialAd) {
-                    interstitialAd = ad
-                    loaded = true
+        runCatching {
+            InterstitialAd.load(
+                application,
+                TEST_INTERSTITIAL_AD_UNIT,
+                AdRequest.Builder().build(),
+                object : InterstitialAdLoadCallback() {
+                    override fun onAdLoaded(ad: InterstitialAd) {
+                        interstitialAd = ad
+                        loaded = true
+                    }
                 }
-            }
-        )
+            )
+        }.onFailure { error ->
+            Log.w(tag, "No se pudo cargar interstitial", error)
+        }
     }
 
     fun showInterstitialIfAvailable(activity: Activity, onDone: () -> Unit) {

@@ -30,6 +30,8 @@ class ForenseRecoveryApplication : Application() {
         recoveryRepository = RecoveryRepositoryImpl(database.recoveryItemDao())
         monetizationManager = MonetizationManager(this)
         adsManager = AdsManager(this)
-        adsManager.initialize()
+        runCatching {
+            adsManager.initialize()
+        }
     }
 }
