@@ -419,7 +419,11 @@ fun MainScreen(
                 monetizationViewModel.dismissPaywall()
             },
             onBuy = { productId ->
-                val launched = monetizationViewModel.launchPurchase(activity, productId)
+                val launched = if (activity != null) {
+                    monetizationViewModel.launchPurchase(activity, productId)
+                } else {
+                    false
+                }
                 if (!launched) {
                     viewModel.showMessage("No se pudo abrir la compra. Reintenta en unos segundos.")
                 }
@@ -832,6 +836,8 @@ private fun resolveTreeDisplayName(
     return if (segment.isNullOrBlank()) "Carpeta seleccionada" else segment
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MonetizationStatusCard(
     isPremiumUnlocked: Boolean,
