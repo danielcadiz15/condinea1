@@ -837,7 +837,6 @@ private fun resolveTreeDisplayName(
 }
 
 @OptIn(ExperimentalLayoutApi::class)
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MonetizationStatusCard(
     isPremiumUnlocked: Boolean,
