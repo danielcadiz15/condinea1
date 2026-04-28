@@ -39,9 +39,9 @@ object MonetizationConfig {
     const val BANNER_AD_UNIT_ID = BuildConfig.ADMOB_BANNER_AD_UNIT_ID
     const val INTERSTITIAL_AD_UNIT_ID = BuildConfig.ADMOB_INTERSTITIAL_AD_UNIT_ID
 
-    const val PREMIUM_SUB_MONTHLY = BuildConfig.BILLING_PREMIUM_SUB_MONTHLY
-    const val PREMIUM_SUB_YEARLY = BuildConfig.BILLING_PREMIUM_SUB_YEARLY
-    const val PREMIUM_LIFETIME = BuildConfig.BILLING_PREMIUM_LIFETIME
+    const val PREMIUM_SUB_MONTHLY = BuildConfig.BILLING_PREMIUM_SUB_MONTHLY_ID
+    const val PREMIUM_SUB_YEARLY = BuildConfig.BILLING_PREMIUM_SUB_YEARLY_ID
+    const val PREMIUM_LIFETIME = BuildConfig.BILLING_PREMIUM_LIFETIME_ID
 
     fun resolvedAdMobAppId(): String = ADMOB_APP_ID.ifBlank { ADMOB_APP_ID_TEST }
     fun resolvedBannerAdUnitId(): String = BANNER_AD_UNIT_ID.ifBlank { BANNER_AD_UNIT_TEST }
