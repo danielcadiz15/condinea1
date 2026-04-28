@@ -19,11 +19,12 @@ class ScanCoordinator(
 ) {
     private val workManager = WorkManager.getInstance(this.context)
 
-    fun enqueueScan(mode: ScanMode, clearPrevious: Boolean = false): UUID {
+    fun enqueueScan(mode: ScanMode, profileName: String, clearPrevious: Boolean = false): UUID {
         val request = OneTimeWorkRequestBuilder<ScanWorker>()
             .setInputData(
                 Data.Builder()
                     .putString(ScanWorker.KEY_MODE, mode.name)
+                    .putString(ScanWorker.KEY_PROFILE, profileName)
                     .putBoolean(ScanWorker.KEY_CLEAR_PREVIOUS, clearPrevious)
                     .build()
             )
@@ -64,6 +65,7 @@ class ScanCoordinator(
                         ScanWorkerState.Running(
                             scanned = info.progress.getInt(ScanWorker.KEY_PROGRESS_SCANNED, 0),
                             discovered = info.progress.getInt(ScanWorker.KEY_PROGRESS_DISCOVERED, 0),
+                            total = info.progress.getInt(ScanWorker.KEY_PROGRESS_TOTAL, 0).takeIf { it > 0 },
                             stage = info.progress.getString(ScanWorker.KEY_PROGRESS_STAGE).orEmpty(),
                             currentPath = info.progress.getString(ScanWorker.KEY_PROGRESS_PATH).orEmpty(),
                             warning = info.progress.getString(ScanWorker.KEY_PROGRESS_WARNING)
@@ -82,6 +84,7 @@ sealed class ScanWorkerState {
     data class Running(
         val scanned: Int,
         val discovered: Int,
+        val total: Int?,
         val stage: String,
         val currentPath: String,
         val warning: String?

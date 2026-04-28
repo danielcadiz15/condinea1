@@ -21,8 +21,12 @@ class ScanWorker(
         val mode = runCatching {
             ScanMode.valueOf(inputData.getString(KEY_MODE) ?: ScanMode.BASIC.name)
         }.getOrDefault(ScanMode.BASIC)
+        val profile = inputData.getString(KEY_PROFILE)
         val clear = inputData.getBoolean(KEY_CLEAR_PREVIOUS, false)
         val safTreeUri = ScanRuntimeControl.getSafTreeUri()
+        if (!profile.isNullOrBlank()) {
+            ScanRuntimeControl.setScanProfile(profile)
+        }
         val engine = ForensicEngine(applicationContext, app.recoveryRepository)
 
         return runCatching {
@@ -36,6 +40,7 @@ class ScanWorker(
                     Data.Builder()
                         .putInt(KEY_PROGRESS_SCANNED, progress.scanned)
                         .putInt(KEY_PROGRESS_DISCOVERED, progress.discovered)
+                        .putInt(KEY_PROGRESS_TOTAL, progress.expectedTotal ?: 0)
                         .putString(KEY_PROGRESS_STAGE, progress.stage)
                         .putString(KEY_PROGRESS_PATH, progress.currentPath)
                         .putString(KEY_PROGRESS_WARNING, progress.warning)
@@ -63,9 +68,11 @@ class ScanWorker(
 
     companion object {
         const val KEY_MODE = "scan_mode"
+        const val KEY_PROFILE = "scan_profile"
         const val KEY_CLEAR_PREVIOUS = "clear_previous"
         const val KEY_PROGRESS_SCANNED = "progress_scanned"
         const val KEY_PROGRESS_DISCOVERED = "progress_discovered"
+        const val KEY_PROGRESS_TOTAL = "progress_total"
         const val KEY_PROGRESS_STAGE = "progress_stage"
         const val KEY_PROGRESS_PATH = "progress_path"
         const val KEY_PROGRESS_WARNING = "progress_warning"

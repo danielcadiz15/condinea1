@@ -9,7 +9,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,15 +29,21 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -53,6 +58,7 @@ import com.forenserecovery.android.domain.model.ItemViewMode
 import com.forenserecovery.android.domain.model.RecoveryItem
 import com.forenserecovery.android.domain.model.RecoveryType
 import com.forenserecovery.android.domain.model.ScanMode
+import com.forenserecovery.android.domain.model.ScanProfile
 import com.forenserecovery.android.permissions.PermissionHelper
 import com.forenserecovery.android.ui.viewmodel.MainViewModel
 import java.io.File
@@ -92,6 +98,21 @@ fun MainScreen(
         viewModel.showMessage("Árbol SAF configurado para escaneo: $uri")
     }
 
+    val restoreDestinationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri == null) {
+            viewModel.showMessage("No se seleccionó carpeta destino de restauración.")
+            return@rememberLauncherForActivityResult
+        }
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+        }
+        viewModel.selectRestoreDestination(uri.toString())
+        viewModel.showMessage("Destino de restauración establecido: $uri")
+    }
+
     LaunchedEffect(state.message) {
         val msg = state.message ?: return@LaunchedEffect
         snackbar.showSnackbar(msg)
@@ -120,6 +141,10 @@ fun MainScreen(
                     viewModel.selectMode(it)
                     viewModel.showMessage(PermissionHelper.modeDescription(it))
                 }
+            )
+            ScanProfileSelector(
+                selected = state.selectedScanProfile,
+                onSelected = viewModel::selectScanProfile
             )
             ForensicStatusCard(
                 mode = state.selectedMode,
@@ -154,7 +179,29 @@ fun MainScreen(
             )
             FilterRow(
                 selectedFilter = state.selectedFilter,
-                onFilterChanged = viewModel::selectFilter
+                onFilterChanged = viewModel::selectFilter,
+                selectedFolder = state.selectedSourceFolder,
+                availableFolders = state.availableSourceFolders,
+                onFolderChanged = viewModel::selectSourceFolder
+            )
+            RestoreActionsCard(
+                state = state,
+                onSelectDestination = { restoreDestinationLauncher.launch(null) },
+                onRestoreSelected = {
+                    if (state.selectedRestoreDestinationUri.isNullOrBlank()) {
+                        restoreDestinationLauncher.launch(null)
+                    } else {
+                        viewModel.restoreSelected()
+                    }
+                },
+                onRestoreAllVisible = {
+                    if (state.selectedRestoreDestinationUri.isNullOrBlank()) {
+                        restoreDestinationLauncher.launch(null)
+                    } else {
+                        viewModel.restoreAllVisible()
+                    }
+                },
+                onClearSelection = viewModel::clearSelection
             )
             ExportRow(
                 onExportAll = viewModel::exportAll,
@@ -180,9 +227,19 @@ fun MainScreen(
             }
 
             if (state.viewMode == ItemViewMode.GRID) {
-                GridContent(state.items) { viewModel.selectItem(it) }
+                GridContent(
+                    items = state.items,
+                    selectedIds = state.selectedRestoreIds,
+                    onSelectItem = { viewModel.selectItem(it) },
+                    onToggleSelection = { viewModel.toggleItemSelection(it) }
+                )
             } else {
-                ListContent(state.items) { viewModel.selectItem(it) }
+                ListContent(
+                    items = state.items,
+                    selectedIds = state.selectedRestoreIds,
+                    onSelectItem = { viewModel.selectItem(it) },
+                    onToggleSelection = { viewModel.toggleItemSelection(it) }
+                )
             }
         }
     }
@@ -277,6 +334,27 @@ private fun ModeSelector(
 }
 
 @Composable
+private fun ScanProfileSelector(
+    selected: ScanProfile,
+    onSelected: (ScanProfile) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Tipo de escaneo", fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ScanProfile.entries.forEach { profile ->
+                    FilterChip(
+                        selected = selected == profile,
+                        onClick = { onSelected(profile) },
+                        label = { Text(profile.label) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ForensicStatusCard(
     mode: ScanMode,
     capability: String,
@@ -323,10 +401,26 @@ private fun ScanControls(
                 }
             }
             if (state.progress.isRunning) {
+                val progressValue = runCatching {
+                    val expected = state.progress.expectedTotal
+                    when {
+                        expected != null && expected > 0 ->
+                            (state.progress.scanned.toFloat() / expected.toFloat()).coerceIn(0f, 1f)
+
+                        state.progress.scanned > 0 ->
+                            (state.progress.discovered.toFloat() / state.progress.scanned.toFloat()).coerceIn(0f, 1f)
+
+                        else -> 0f
+                    }
+                }.getOrDefault(0f)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CircularProgressIndicator(modifier = Modifier.height(24.dp))
                     Text("${state.progress.stage} (${state.progress.scanned} analizados / ${state.progress.discovered} hallazgos)")
                 }
+                LinearProgressIndicator(
+                    progress = { progressValue },
+                    modifier = Modifier.fillMaxWidth()
+                )
                 if (state.progress.currentPath.isNotBlank()) {
                     Text(
                         state.progress.currentPath,
@@ -345,8 +439,12 @@ private fun ScanControls(
 @Composable
 private fun FilterRow(
     selectedFilter: ItemFilter,
-    onFilterChanged: (ItemFilter) -> Unit
+    onFilterChanged: (ItemFilter) -> Unit,
+    selectedFolder: String,
+    availableFolders: List<String>,
+    onFolderChanged: (String) -> Unit
 ) {
+    var showFolders by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -373,6 +471,71 @@ private fun FilterRow(
                 }
             )
         }
+        Box {
+            OutlinedButton(onClick = { showFolders = true }) {
+                val label = if (selectedFolder == "Todas") {
+                    "Todas"
+                } else {
+                    selectedFolder.substringAfterLast('/')
+                }
+                Text("Carpeta: $label", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            DropdownMenu(
+                expanded = showFolders,
+                onDismissRequest = { showFolders = false }
+            ) {
+                availableFolders.forEach { folder ->
+                    DropdownMenuItem(
+                        text = { Text(folder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        onClick = {
+                            onFolderChanged(folder)
+                            showFolders = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RestoreActionsCard(
+    state: com.forenserecovery.android.ui.viewmodel.MainUiState,
+    onSelectDestination: () -> Unit,
+    onRestoreSelected: () -> Unit,
+    onRestoreAllVisible: () -> Unit,
+    onClearSelection: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Restauración", fontWeight = FontWeight.Bold)
+            Text(
+                "Destino: ${state.selectedRestoreDestinationUri ?: "No seleccionado"}",
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                "Seleccionadas: ${state.selectedRestoreIds.size} | Visibles: ${state.items.size}",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onSelectDestination) { Text("Elegir destino") }
+                OutlinedButton(onClick = onRestoreSelected, enabled = state.selectedRestoreIds.isNotEmpty() && !state.isRestoring) {
+                    Text("Restaurar seleccionadas")
+                }
+                OutlinedButton(onClick = onRestoreAllVisible, enabled = state.items.isNotEmpty() && !state.isRestoring) {
+                    Text("Restaurar todas")
+                }
+                OutlinedButton(onClick = onClearSelection, enabled = state.selectedRestoreIds.isNotEmpty()) {
+                    Text("Limpiar selección")
+                }
+            }
+            if (state.isRestoring) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text("Restaurando archivos...", style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 
@@ -395,7 +558,9 @@ private fun ExportRow(
 @Composable
 private fun GridContent(
     items: List<RecoveryItem>,
-    onSelectItem: (RecoveryItem) -> Unit
+    selectedIds: Set<Long>,
+    onSelectItem: (RecoveryItem) -> Unit,
+    onToggleSelection: (Long) -> Unit
 ) {
     LazyVerticalGrid(
         modifier = Modifier.fillMaxWidth(),
@@ -408,6 +573,15 @@ private fun GridContent(
                 modifier = Modifier.clickable { onSelectItem(item) }
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Checkbox(
+                            checked = item.id in selectedIds,
+                            onCheckedChange = { onToggleSelection(item.id) }
+                        )
+                    }
                     val preview = item.recoveredPath ?: item.originalPath
                     if (item.type.name == "IMAGE" && !preview.isNullOrBlank()) {
                         AsyncImage(
@@ -435,7 +609,9 @@ private fun GridContent(
 @Composable
 private fun ListContent(
     items: List<RecoveryItem>,
-    onSelectItem: (RecoveryItem) -> Unit
+    selectedIds: Set<Long>,
+    onSelectItem: (RecoveryItem) -> Unit,
+    onToggleSelection: (Long) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
@@ -444,6 +620,15 @@ private fun ListContent(
         items(items, key = { it.id }) { item ->
             Card(modifier = Modifier.fillMaxWidth().clickable { onSelectItem(item) }) {
                 Column(modifier = Modifier.padding(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Checkbox(
+                            checked = item.id in selectedIds,
+                            onCheckedChange = { onToggleSelection(item.id) }
+                        )
+                    }
                     Text("${item.type} | ${item.status}", fontWeight = FontWeight.SemiBold)
                     Text(item.mimeType ?: "MIME desconocido", style = MaterialTheme.typography.bodySmall)
                     Text(item.originalPath ?: "-", maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -8,6 +8,7 @@ import com.forenserecovery.android.domain.model.RecoveryItem
 import com.forenserecovery.android.domain.model.RecoveryStatus
 import com.forenserecovery.android.domain.model.RecoveryType
 import com.forenserecovery.android.domain.model.ScanMode
+import com.forenserecovery.android.domain.model.ScanProfile
 import com.forenserecovery.android.domain.model.ScanProgress
 import com.forenserecovery.android.domain.model.ScanSource
 import com.forenserecovery.android.domain.repository.RecoveryRepository
@@ -42,6 +43,9 @@ class ForensicEngine(
         onProgress: suspend (ScanProgress) -> Unit
     ): ScanSummaryResult = withContext(Dispatchers.IO) {
         if (clearPrevious) repository.clear()
+        val profile = runCatching {
+            ScanProfile.valueOf(ScanRuntimeControl.getScanProfile() ?: ScanProfile.BALANCED.name)
+        }.getOrDefault(ScanProfile.BALANCED)
         controlCenter.resume()
         var scanned = 0
         var discovered = 0
@@ -57,6 +61,7 @@ class ForensicEngine(
                 ScanProgress(
                     scanned = scanned,
                     discovered = discovered,
+                    expectedTotal = null,
                     currentPath = path,
                     stage = stage,
                     isRunning = running,
@@ -66,7 +71,7 @@ class ForensicEngine(
             )
         }
 
-        tick(stage = "Preparando escaneo")
+        tick(stage = "Preparando escaneo (${profile.label})")
 
         try {
             val mediaHits = mediaStoreScanner.scan { current ->
@@ -83,6 +88,7 @@ class ForensicEngine(
                 controlCenter.awaitIfPaused()
                 if (ingestCandidate(hit, technicalLog)) discovered += 1
             }
+            tick(stage = "MediaStore completado", warning = buildScanWarning(profile, "MediaStore"))
 
             if (!controlCenter.isCancelled()) {
                 val storageHits = sharedStorageScanner.scan(mode) { current ->
@@ -99,6 +105,10 @@ class ForensicEngine(
                     controlCenter.awaitIfPaused()
                     if (ingestCandidate(hit, technicalLog)) discovered += 1
                 }
+                tick(
+                    stage = "Almacenamiento compartido completado",
+                    warning = buildScanWarning(profile, "SharedStorage")
+                )
             }
 
             if (!controlCenter.isCancelled() && !safTreeUri.isNullOrBlank()) {
@@ -116,6 +126,7 @@ class ForensicEngine(
                     controlCenter.awaitIfPaused()
                     if (ingestCandidate(hit, technicalLog)) discovered += 1
                 }
+                tick(stage = "SAF completado", warning = buildScanWarning(profile, "SAF"))
             }
         } finally {
             controlCenter.resume()
@@ -361,6 +372,14 @@ class ForensicEngine(
         if (hit.isPartialHint) score -= 0.15f
         if (thumbnail) score -= 0.10f
         return score.coerceIn(0.05f, 0.99f)
+    }
+
+    private fun buildScanWarning(profile: ScanProfile, source: String): String? {
+        return when (profile) {
+            ScanProfile.QUICK -> "Perfil QUICK en $source: prioriza velocidad, puede omitir evidencia parcial."
+            ScanProfile.BALANCED -> null
+            ScanProfile.DEEP -> "Perfil DEEP en $source: mayor profundidad, mayor tiempo y consumo."
+        }
     }
 }
 

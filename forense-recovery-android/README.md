@@ -77,10 +77,15 @@ Aplicación Android nativa (Kotlin + Jetpack Compose) orientada a **recuperació
 - UI:
   - aviso legal/ético,
   - selector de modo,
+  - selector de perfil de escaneo (rápido / balanceado / profundo),
   - estado de capacidad forense detectada (Shizuku/ADB),
   - selector de carpeta SAF para modo avanzado/forense,
   - iniciar / pausar / reanudar / cancelar escaneo,
-  - progreso en tiempo real,
+  - barra de progreso en tiempo real + etapa activa de escaneo,
+  - filtro por carpeta origen,
+  - galería/lista en vivo con selección múltiple,
+  - restaurar seleccionadas o todas las visibles,
+  - selector de carpeta destino antes de restaurar,
   - filtros y vista grid/lista,
   - detalle técnico de hallazgos + apertura externa de imagen/audio/video.
 - Exportación:

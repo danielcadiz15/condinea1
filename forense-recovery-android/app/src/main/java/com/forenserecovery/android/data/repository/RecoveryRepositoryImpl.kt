@@ -4,7 +4,6 @@ import com.forenserecovery.android.data.local.RecoveryItemDao
 import com.forenserecovery.android.data.local.toDomain
 import com.forenserecovery.android.data.local.toEntity
 import com.forenserecovery.android.domain.model.RecoveryItem
-import com.forenserecovery.android.domain.model.RecoveryStatus
 import com.forenserecovery.android.domain.repository.RecoveryRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -26,6 +25,4 @@ class RecoveryRepositoryImpl(
     override suspend fun findBySha256(sha256: String): RecoveryItem? = dao.getBySha(sha256)?.toDomain()
 
     override suspend fun clear() = dao.clear()
-
-    override suspend fun countByStatus(status: RecoveryStatus): Int = dao.countByStatus(status.name)
 }

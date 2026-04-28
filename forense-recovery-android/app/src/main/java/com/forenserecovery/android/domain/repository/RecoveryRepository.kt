@@ -1,7 +1,6 @@
 package com.forenserecovery.android.domain.repository
 
 import com.forenserecovery.android.domain.model.RecoveryItem
-import com.forenserecovery.android.domain.model.RecoveryStatus
 import kotlinx.coroutines.flow.Flow
 
 interface RecoveryRepository {
@@ -11,5 +10,4 @@ interface RecoveryRepository {
     suspend fun findBySha256(sha256: String): RecoveryItem?
     suspend fun upsert(item: RecoveryItem): Long
     suspend fun clear()
-    suspend fun countByStatus(status: RecoveryStatus): Int
 }

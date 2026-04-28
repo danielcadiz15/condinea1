@@ -10,6 +10,8 @@ object ScanRuntimeControl {
     private val control = ScanControlCenter()
     @Volatile
     private var safTreeUri: String? = null
+    @Volatile
+    private var scanProfileName: String? = null
 
     fun controlCenter(): ScanControlCenter = control
 
@@ -28,4 +30,10 @@ object ScanRuntimeControl {
     }
 
     fun getSafTreeUri(): String? = safTreeUri
+
+    fun setScanProfile(profileName: String?) {
+        scanProfileName = profileName
+    }
+
+    fun getScanProfile(): String? = scanProfileName
 }

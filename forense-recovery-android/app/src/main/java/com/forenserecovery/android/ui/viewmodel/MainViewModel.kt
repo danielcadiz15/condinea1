@@ -9,9 +9,11 @@ import com.forenserecovery.android.domain.model.ItemViewMode
 import com.forenserecovery.android.domain.model.RecoveryItem
 import com.forenserecovery.android.domain.model.ScanMode
 import com.forenserecovery.android.domain.model.ScanProgress
+import com.forenserecovery.android.domain.model.ScanProfile
 import com.forenserecovery.android.domain.usecase.matchesFilter
 import com.forenserecovery.android.export.ExportManager
 import com.forenserecovery.android.recovery.ForensicCapabilityDetector
+import com.forenserecovery.android.recovery.RestoreManager
 import com.forenserecovery.android.recovery.ScanCoordinator
 import com.forenserecovery.android.recovery.ScanRuntimeControl
 import com.forenserecovery.android.recovery.ScanWorker
@@ -23,13 +25,19 @@ import kotlinx.coroutines.launch
 
 data class MainUiState(
     val selectedMode: ScanMode = ScanMode.BASIC,
+    val selectedScanProfile: ScanProfile = ScanProfile.BALANCED,
     val selectedFilter: ItemFilter = ItemFilter.ALL,
     val selectedSafTreeUri: String? = null,
+    val selectedSourceFolder: String = "Todas",
+    val availableSourceFolders: List<String> = listOf("Todas"),
     val viewMode: ItemViewMode = ItemViewMode.GRID,
     val progress: ScanProgress = ScanProgress(),
     val workerState: ScanWorkerState = ScanWorkerState.Idle,
     val allItems: List<RecoveryItem> = emptyList(),
     val items: List<RecoveryItem> = emptyList(),
+    val selectedRestoreIds: Set<Long> = emptySet(),
+    val selectedRestoreDestinationUri: String? = null,
+    val isRestoring: Boolean = false,
     val technicalLog: List<String> = emptyList(),
     val selectedItem: RecoveryItem? = null,
     val lastExportPath: String? = null,
@@ -45,6 +53,7 @@ class MainViewModel(
     private val repository = app.recoveryRepository
     private val scanCoordinator = ScanCoordinator(application)
     private val exportManager = ExportManager(application)
+    private val restoreManager = RestoreManager(application)
 
     private val _ui = MutableStateFlow(MainUiState())
     val ui: StateFlow<MainUiState> = _ui
@@ -62,9 +71,19 @@ class MainViewModel(
     private fun observeItems() {
         viewModelScope.launch {
             repository.observeItems().collect { allItems ->
-                val filter = _ui.value.selectedFilter
-                val filtered = allItems.filter { it.matchesFilter(filter) }
-                val selected = _ui.value.selectedItem
+                val currentState = _ui.value
+                val folders = buildFolderOptions(allItems)
+                val effectiveFolder = if (currentState.selectedSourceFolder in folders) {
+                    currentState.selectedSourceFolder
+                } else {
+                    "Todas"
+                }
+                val filtered = applyFilters(
+                    source = allItems,
+                    itemFilter = currentState.selectedFilter,
+                    sourceFolder = effectiveFolder
+                )
+                val selected = currentState.selectedItem
                 val updatedSelected = selected?.let { sel ->
                     filtered.firstOrNull { it.id == sel.id }
                 }
@@ -72,6 +91,8 @@ class MainViewModel(
                     it.copy(
                         allItems = allItems,
                         items = filtered,
+                        selectedSourceFolder = effectiveFolder,
+                        availableSourceFolders = folders,
                         selectedItem = updatedSelected
                     )
                 }
@@ -89,6 +110,7 @@ class MainViewModel(
                             progress = it.progress.copy(
                                 scanned = state.scanned,
                                 discovered = state.discovered,
+                                expectedTotal = state.total,
                                 stage = state.stage,
                                 currentPath = state.currentPath,
                                 warning = state.warning,
@@ -107,6 +129,7 @@ class MainViewModel(
                                 isPaused = false,
                                 stage = "Escaneo finalizado"
                             ),
+                            selectedRestoreIds = emptySet(),
                             message = "Escaneo completado."
                         )
                     }
@@ -114,6 +137,7 @@ class MainViewModel(
                     is ScanWorkerState.Error -> _ui.update {
                         it.copy(
                             progress = it.progress.copy(isRunning = false, isPaused = false),
+                            selectedRestoreIds = emptySet(),
                             message = state.message ?: "Error en escaneo"
                         )
                     }
@@ -121,6 +145,7 @@ class MainViewModel(
                     ScanWorkerState.Cancelled -> _ui.update {
                         it.copy(
                             progress = it.progress.copy(isRunning = false, isPaused = false, stage = "Escaneo cancelado"),
+                            selectedRestoreIds = emptySet(),
                             message = "Escaneo cancelado"
                         )
                     }
@@ -158,14 +183,77 @@ class MainViewModel(
         _ui.update { it.copy(selectedMode = mode, forensicCapability = capability) }
     }
 
+    fun selectScanProfile(profile: ScanProfile) {
+        _ui.update { it.copy(selectedScanProfile = profile) }
+    }
+
     fun setSafTreeUri(uri: String?) {
         _ui.update { it.copy(selectedSafTreeUri = uri) }
     }
 
     fun selectFilter(filter: ItemFilter) {
-        val allItems = _ui.value.allItems
-        val filtered = if (filter == ItemFilter.ALL) allItems else allItems.filter { it.matchesFilter(filter) }
+        val state = _ui.value
+        val filtered = applyFilters(
+            source = state.allItems,
+            itemFilter = filter,
+            sourceFolder = state.selectedSourceFolder
+        )
         _ui.update { it.copy(selectedFilter = filter, items = filtered) }
+    }
+
+    fun selectSourceFolder(folder: String) {
+        val state = _ui.value
+        val filtered = applyFilters(
+            source = state.allItems,
+            itemFilter = state.selectedFilter,
+            sourceFolder = folder
+        )
+        _ui.update { it.copy(selectedSourceFolder = folder, items = filtered) }
+    }
+
+    fun toggleItemSelection(itemId: Long) {
+        _ui.update { state ->
+            val selected = state.selectedRestoreIds.toMutableSet()
+            if (!selected.add(itemId)) {
+                selected.remove(itemId)
+            }
+            state.copy(selectedRestoreIds = selected)
+        }
+    }
+
+    fun clearSelection() {
+        _ui.update { it.copy(selectedRestoreIds = emptySet()) }
+    }
+
+    fun selectRestoreDestination(uri: String?) {
+        _ui.update { it.copy(selectedRestoreDestinationUri = uri) }
+    }
+
+    fun restoreSelected() {
+        val state = _ui.value
+        if (state.selectedRestoreDestinationUri.isNullOrBlank()) {
+            showMessage("Selecciona primero la carpeta destino para restaurar.")
+            return
+        }
+        val targetItems = state.allItems.filter { it.id in state.selectedRestoreIds }
+        if (targetItems.isEmpty()) {
+            showMessage("No hay elementos seleccionados para restaurar.")
+            return
+        }
+        restoreItems(targetItems)
+    }
+
+    fun restoreAllVisible() {
+        val state = _ui.value
+        if (state.selectedRestoreDestinationUri.isNullOrBlank()) {
+            showMessage("Selecciona primero la carpeta destino para restaurar.")
+            return
+        }
+        if (state.items.isEmpty()) {
+            showMessage("No hay elementos visibles para restaurar.")
+            return
+        }
+        restoreItems(state.items)
     }
 
     fun toggleViewMode() {
@@ -183,16 +271,23 @@ class MainViewModel(
     fun startScan(clearPrevious: Boolean = false) {
         val mode = _ui.value.selectedMode
         val safTreeUri = _ui.value.selectedSafTreeUri
+        val profile = _ui.value.selectedScanProfile
         ScanRuntimeControl.reset()
         ScanRuntimeControl.setSafTreeUri(safTreeUri)
-        scanCoordinator.enqueueScan(mode = mode, clearPrevious = clearPrevious)
+        ScanRuntimeControl.setScanProfile(profile.name)
+        scanCoordinator.enqueueScan(
+            mode = mode,
+            profileName = profile.name,
+            clearPrevious = clearPrevious
+        )
         _ui.update {
             it.copy(
                 progress = it.progress.copy(
-                    stage = "Escaneo en cola",
+                    stage = "Escaneo en cola (${profile.label})",
                     isRunning = true,
                     isPaused = false
                 ),
+                selectedRestoreIds = emptySet(),
                 message = null
             )
         }
@@ -221,7 +316,7 @@ class MainViewModel(
         scanCoordinator.cancelScan()
         ScanRuntimeControl.setSafTreeUri(null)
         _ui.update {
-            it.copy(selectedSafTreeUri = null)
+            it.copy(selectedSafTreeUri = null, selectedRestoreIds = emptySet())
         }
     }
 
@@ -248,6 +343,10 @@ class MainViewModel(
                     allItems = emptyList(),
                     items = emptyList(),
                     selectedSafTreeUri = null,
+                    selectedSourceFolder = "Todas",
+                    availableSourceFolders = listOf("Todas"),
+                    selectedRestoreDestinationUri = null,
+                    selectedRestoreIds = emptySet(),
                     technicalLog = emptyList(),
                     message = "Base local limpiada"
                 )
@@ -261,5 +360,51 @@ class MainViewModel(
 
     fun showMessage(message: String) {
         _ui.update { it.copy(message = message) }
+    }
+
+    private fun applyFilters(
+        source: List<RecoveryItem>,
+        itemFilter: ItemFilter,
+        sourceFolder: String
+    ): List<RecoveryItem> {
+        return source.filter { item ->
+            val typeMatch = item.matchesFilter(itemFilter)
+            val folder = extractSourceFolder(item)
+            val folderMatch = sourceFolder == "Todas" || folder == sourceFolder
+            typeMatch && folderMatch
+        }
+    }
+
+    private fun buildFolderOptions(items: List<RecoveryItem>): List<String> {
+        val folders = items.map { extractSourceFolder(it) }
+            .distinct()
+            .sorted()
+        return listOf("Todas") + folders
+    }
+
+    private fun extractSourceFolder(item: RecoveryItem): String {
+        val path = item.originalPath ?: return "Desconocida"
+        return runCatching {
+            val normalized = path.substringBeforeLast('/')
+            if (normalized.isBlank()) "Desconocida" else normalized
+        }.getOrDefault("Desconocida")
+    }
+
+    private fun restoreItems(items: List<RecoveryItem>) {
+        val destination = _ui.value.selectedRestoreDestinationUri ?: return
+        viewModelScope.launch {
+            _ui.update { it.copy(isRestoring = true) }
+            val result = restoreManager.restoreItems(
+                destinationTreeUri = destination,
+                items = items
+            )
+            _ui.update {
+                it.copy(
+                    isRestoring = false,
+                    selectedRestoreIds = emptySet(),
+                    message = "Restaurados ${result.restoredCount}/${result.requestedCount}. Fallidos: ${result.failedCount}. Destino: ${result.destinationUri}"
+                )
+            }
+        }
     }
 }

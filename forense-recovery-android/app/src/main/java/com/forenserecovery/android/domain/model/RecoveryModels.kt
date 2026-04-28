@@ -27,6 +27,14 @@ enum class ScanMode {
     FORENSIC
 }
 
+enum class ScanProfile(
+    val label: String
+) {
+    QUICK("Rápido"),
+    BALANCED("Balanceado"),
+    DEEP("Profundo")
+}
+
 @Serializable
 enum class ScanSource {
     MEDIA_STORE,
@@ -76,6 +84,7 @@ data class RecoveryItem(
 data class ScanProgress(
     val scanned: Int = 0,
     val discovered: Int = 0,
+    val expectedTotal: Int? = null,
     val currentPath: String = "",
     val stage: String = "",
     val isRunning: Boolean = false,
