@@ -205,7 +205,7 @@ fun MainScreen(
             if (!monetizationState.isPremiumUnlocked) {
                 item {
                     BasicModeBannerAd(
-                        adUnitId = MonetizationConfig.BANNER_AD_UNIT_TEST
+                        adUnitId = MonetizationConfig.bannerAdUnitId
                     )
                 }
             }

@@ -31,7 +31,7 @@ class AdsManager(
         runCatching {
             InterstitialAd.load(
                 application,
-                TEST_INTERSTITIAL_AD_UNIT,
+                MonetizationConfig.interstitialAdUnitId,
                 AdRequest.Builder().build(),
                 object : InterstitialAdLoadCallback() {
                     override fun onAdLoaded(ad: InterstitialAd) {
@@ -70,8 +70,5 @@ class AdsManager(
         ad.show(activity)
     }
 
-    companion object {
-        // AdMob test interstitial unit id (safe for development/testing)
-        private const val TEST_INTERSTITIAL_AD_UNIT = "ca-app-pub-3940256099942544/1033173712"
-    }
+    companion object
 }

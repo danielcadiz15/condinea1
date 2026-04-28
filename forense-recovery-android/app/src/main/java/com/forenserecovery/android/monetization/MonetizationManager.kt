@@ -1,6 +1,7 @@
 package com.forenserecovery.android.monetization
 
 import android.app.Activity
+import com.forenserecovery.android.BuildConfig
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
@@ -33,14 +34,27 @@ data class MonetizationState(
 object MonetizationConfig {
     const val ADMOB_APP_ID_TEST = "ca-app-pub-3940256099942544~3347511713"
     const val BANNER_AD_UNIT_TEST = "ca-app-pub-3940256099942544/6300978111"
+    const val INTERSTITIAL_AD_UNIT_TEST = "ca-app-pub-3940256099942544/1033173712"
+    const val ADMOB_APP_ID = BuildConfig.ADMOB_APP_ID
+    const val BANNER_AD_UNIT_ID = BuildConfig.ADMOB_BANNER_AD_UNIT_ID
+    const val INTERSTITIAL_AD_UNIT_ID = BuildConfig.ADMOB_INTERSTITIAL_AD_UNIT_ID
 
-    // Reemplazar por IDs reales de Play Console.
-    const val PREMIUM_SUB_MONTHLY = "forense_premium_monthly"
-    const val PREMIUM_SUB_YEARLY = "forense_premium_yearly"
-    const val PREMIUM_LIFETIME = "forense_premium_lifetime"
+    const val PREMIUM_SUB_MONTHLY = BuildConfig.BILLING_PREMIUM_SUB_MONTHLY
+    const val PREMIUM_SUB_YEARLY = BuildConfig.BILLING_PREMIUM_SUB_YEARLY
+    const val PREMIUM_LIFETIME = BuildConfig.BILLING_PREMIUM_LIFETIME
+
+    fun resolvedAdMobAppId(): String = ADMOB_APP_ID.ifBlank { ADMOB_APP_ID_TEST }
+    fun resolvedBannerAdUnitId(): String = BANNER_AD_UNIT_ID.ifBlank { BANNER_AD_UNIT_TEST }
+    fun resolvedInterstitialAdUnitId(): String =
+        INTERSTITIAL_AD_UNIT_ID.ifBlank { INTERSTITIAL_AD_UNIT_TEST }
+    val adMobAppId: String = resolvedAdMobAppId()
+    val bannerAdUnitId: String = resolvedBannerAdUnitId()
+    val interstitialAdUnitId: String = resolvedInterstitialAdUnitId()
 
     val subscriptionProductIds = listOf(PREMIUM_SUB_MONTHLY, PREMIUM_SUB_YEARLY)
+        .filter { it.isNotBlank() }
     val inAppProductIds = listOf(PREMIUM_LIFETIME)
+        .filter { it.isNotBlank() }
     val premiumProductIds = (subscriptionProductIds + inAppProductIds).toSet()
 }
 

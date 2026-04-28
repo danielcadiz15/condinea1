@@ -1,6 +1,7 @@
 *.iml
 .gradle
 /local.properties
+/monetization.properties
 /.idea
 /.kotlin
 /build

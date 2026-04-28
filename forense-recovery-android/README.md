@@ -155,6 +155,68 @@ Cómo probar desde tu teléfono:
 
 También puedes descargar el artifact desde la pestaña **Actions** en la ejecución más reciente.
 
+## Configuración de monetización (AdMob + Google Play Billing)
+
+La app ya está preparada para usar IDs reales sin hardcodearlos en el código.
+
+### 1) Crear archivo local de configuración
+
+En la raíz del proyecto crea un archivo llamado:
+
+`monetization.properties`
+
+Puedes partir de `monetization.properties.example`:
+
+```properties
+ADMOB_APP_ID=ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy
+ADMOB_BANNER_AD_UNIT_ID=ca-app-pub-xxxxxxxxxxxxxxxx/zzzzzzzzzz
+ADMOB_INTERSTITIAL_AD_UNIT_ID=ca-app-pub-xxxxxxxxxxxxxxxx/aaaaaaaaaa
+BILLING_PREMIUM_SUB_MONTHLY_ID=forense_premium_monthly
+BILLING_PREMIUM_SUB_YEARLY_ID=forense_premium_yearly
+BILLING_PREMIUM_LIFETIME_ID=forense_premium_lifetime
+```
+
+> `monetization.properties` está ignorado por git para no exponer credenciales/IDs reales.
+
+### 2) AdMob
+
+En Google AdMob:
+
+1. Crea la app.
+2. Crea una unidad **Banner**.
+3. Crea una unidad **Interstitial**.
+4. Copia esos IDs al `monetization.properties`.
+
+La app toma automáticamente:
+
+- `ADMOB_APP_ID` para `AndroidManifest` (`com.google.android.gms.ads.APPLICATION_ID`)
+- `ADMOB_BANNER_AD_UNIT_ID` para el banner
+- `ADMOB_INTERSTITIAL_AD_UNIT_ID` para interstitial
+
+Si no defines los valores, el proyecto usa IDs de prueba de Google.
+
+### 3) Google Play Billing
+
+En Play Console:
+
+1. Crea productos con los IDs:
+   - `forense_premium_monthly` (suscripción)
+   - `forense_premium_yearly` (suscripción)
+   - `forense_premium_lifetime` (in-app no consumible)
+2. Si quieres cambiar esos IDs, actualízalos en `monetization.properties`.
+3. Agrega cuentas de prueba de licencia.
+4. Prueba compra, restauración y desbloqueo premium.
+
+### 4) Recomendación de release
+
+- Mantén build interno con IDs de prueba.
+- Para publicar, usa `monetization.properties` con IDs reales y genera APK/AAB de release.
+- Verifica en Android real:
+  - banner visible solo en básico,
+  - interstitial funcionando,
+  - paywall correcto,
+  - restaurar compras.
+
 ## Próximos pasos sugeridos
 
 - Integración activa de comandos forenses vía Shizuku/ADB (ejecución real, no solo detección).

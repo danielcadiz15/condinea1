@@ -1,8 +1,21 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
+}
+
+val monetizationProperties = Properties().apply {
+    val file = rootProject.file("monetization.properties")
+    if (file.exists()) {
+        file.inputStream().use(::load)
+    }
+}
+
+fun monetizationValue(key: String, defaultValue: String): String {
+    return monetizationProperties.getProperty(key)?.takeIf { it.isNotBlank() } ?: defaultValue
 }
 
 android {
@@ -20,6 +33,40 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+        manifestPlaceholders["admobAppId"] = monetizationValue(
+            key = "ADMOB_APP_ID",
+            defaultValue = "ca-app-pub-3940256099942544~3347511713"
+        )
+        buildConfigField(
+            "String",
+            "ADMOB_APP_ID",
+            "\"${monetizationValue("ADMOB_APP_ID", "ca-app-pub-3940256099942544~3347511713")}\""
+        )
+        buildConfigField(
+            "String",
+            "ADMOB_BANNER_AD_UNIT_ID",
+            "\"${monetizationValue("BANNER_AD_UNIT_ID", "ca-app-pub-3940256099942544/6300978111")}\""
+        )
+        buildConfigField(
+            "String",
+            "ADMOB_INTERSTITIAL_AD_UNIT_ID",
+            "\"${monetizationValue("INTERSTITIAL_AD_UNIT_ID", "ca-app-pub-3940256099942544/1033173712")}\""
+        )
+        buildConfigField(
+            "String",
+            "BILLING_PREMIUM_SUB_MONTHLY_ID",
+            "\"${monetizationValue("PREMIUM_SUB_MONTHLY", "forense_premium_monthly")}\""
+        )
+        buildConfigField(
+            "String",
+            "BILLING_PREMIUM_SUB_YEARLY_ID",
+            "\"${monetizationValue("PREMIUM_SUB_YEARLY", "forense_premium_yearly")}\""
+        )
+        buildConfigField(
+            "String",
+            "BILLING_PREMIUM_LIFETIME_ID",
+            "\"${monetizationValue("PREMIUM_LIFETIME", "forense_premium_lifetime")}\""
+        )
     }
 
     buildTypes {
