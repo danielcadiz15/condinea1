@@ -1,10 +1,13 @@
 package com.reparafotos.ai.ui.screens
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.ImageDecoder
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -87,11 +90,14 @@ fun RepairHomeScreen() {
     var batchTotal by remember { mutableIntStateOf(0) }
     var batchDone by remember { mutableIntStateOf(0) }
 
-    val singlePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val singlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        persistReadPermission(context, uri)
         selectedUri = uri
     }
-    val batchPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+    val batchPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        uris.forEach { persistReadPermission(context, it) }
         batchTotal = uris.size
         batchDone = 0
         batchRunning = true
@@ -205,10 +211,10 @@ fun RepairHomeScreen() {
 
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { singlePicker.launch("image/*") }) {
+                    Button(onClick = { singlePicker.launch(arrayOf("image/*")) }) {
                         Text("Abrir imagen")
                     }
-                    OutlinedButton(onClick = { batchPicker.launch("image/*") }) {
+                    OutlinedButton(onClick = { batchPicker.launch(arrayOf("image/*")) }) {
                         Text("Lote")
                     }
                     OutlinedButton(
@@ -654,11 +660,40 @@ private suspend fun decodeBitmapForPreview(
     uri: Uri,
     maxDimension: Int = 1280
 ): Bitmap? = withContext(Dispatchers.IO) {
+    val fromImageDecoder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        runCatching {
+            val src = ImageDecoder.createSource(context.contentResolver, uri)
+            ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                val srcW = info.size.width.coerceAtLeast(1)
+                val srcH = info.size.height.coerceAtLeast(1)
+                val maxSide = max(srcW, srcH)
+                if (maxSide > maxDimension) {
+                    val scale = maxDimension.toFloat() / maxSide.toFloat()
+                    decoder.setTargetSize(
+                        (srcW * scale).toInt().coerceAtLeast(1),
+                        (srcH * scale).toInt().coerceAtLeast(1)
+                    )
+                }
+            }
+        }.getOrNull()
+    } else {
+        null
+    }
+    if (fromImageDecoder != null) return@withContext fromImageDecoder
+    decodeWithBitmapFactory(context, uri, maxDimension)
+}
+
+private fun decodeWithBitmapFactory(
+    context: Context,
+    uri: Uri,
+    maxDimension: Int
+): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     context.contentResolver.openInputStream(uri)?.use { input ->
         BitmapFactory.decodeStream(input, null, bounds)
-    } ?: return@withContext null
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
+    } ?: return null
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
     var sample = 1
     while (max(bounds.outWidth / sample, bounds.outHeight / sample) > maxDimension) sample *= 2
     val opts = BitmapFactory.Options().apply {
@@ -667,13 +702,22 @@ private suspend fun decodeBitmapForPreview(
     }
     val decoded = context.contentResolver.openInputStream(uri)?.use { input ->
         BitmapFactory.decodeStream(input, null, opts)
-    } ?: return@withContext null
+    } ?: return null
     val maxSide = max(decoded.width, decoded.height)
-    if (maxSide <= maxDimension) return@withContext decoded
+    if (maxSide <= maxDimension) return decoded
     val scale = maxDimension.toFloat() / maxSide.toFloat()
     val targetW = (decoded.width * scale).toInt().coerceAtLeast(1)
     val targetH = (decoded.height * scale).toInt().coerceAtLeast(1)
-    Bitmap.createScaledBitmap(decoded, targetW, targetH, true)
+    return Bitmap.createScaledBitmap(decoded, targetW, targetH, true)
+}
+
+private fun persistReadPermission(context: Context, uri: Uri) {
+    runCatching {
+        context.contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION
+        )
+    }
 }
 
 private fun saveBitmapToAppFolder(context: Context, bitmap: Bitmap): String? {
