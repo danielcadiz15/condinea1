@@ -30,6 +30,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +49,7 @@ import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun RepairHomeScreen() {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
