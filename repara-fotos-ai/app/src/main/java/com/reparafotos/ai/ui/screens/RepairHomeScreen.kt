@@ -85,6 +85,7 @@ fun RepairHomeScreen() {
     var saturationAdjust by remember { mutableFloatStateOf(1f) }
     var warmthAdjust by remember { mutableFloatStateOf(0f) }
     var motionDeblurAdjust by remember { mutableFloatStateOf(0.35f) }
+    var autoMotionAssistEnabled by remember { mutableStateOf(true) }
 
     var selectedTool by remember { mutableStateOf(EditTool.AUTO_REPAIR) }
     var selectedPreset by remember { mutableStateOf(PresetFilter.NONE) }
@@ -94,6 +95,7 @@ fun RepairHomeScreen() {
     var batchRunning by remember { mutableStateOf(false) }
     var batchTotal by remember { mutableIntStateOf(0) }
     var batchDone by remember { mutableIntStateOf(0) }
+    var batchQueue by remember { mutableStateOf<List<Uri>>(emptyList()) }
 
     val singlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -103,11 +105,11 @@ fun RepairHomeScreen() {
     val batchPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         uris.forEach { persistReadPermission(context, it) }
+        batchQueue = uris
         batchTotal = uris.size
         batchDone = 0
         batchRunning = true
-        // Start from first selected image.
-        selectedUri = uris.first()
+        diagnosis = "Iniciando procesamiento por lote..."
     }
 
     LaunchedEffect(selectedUri) {
@@ -148,10 +150,12 @@ fun RepairHomeScreen() {
         saturationAdjust,
         warmthAdjust,
         motionDeblurAdjust,
+        autoMotionAssistEnabled,
         historyIndex
     ) {
         val source = sourceBitmap ?: return@LaunchedEffect
         if (loadingImage) return@LaunchedEffect
+        if (batchRunning) return@LaunchedEffect
         if (historyIndex >= 0 && historyIndex < history.lastIndex) return@LaunchedEffect
 
         processingPreview = true
@@ -165,14 +169,90 @@ fun RepairHomeScreen() {
             motionDeblur = motionDeblurAdjust
         )
         val effective = resolveSettings(tool = selectedTool, preset = selectedPreset, base = base)
-        val result = withContext(Dispatchers.Default) {
-            applyTool(source = source, tool = selectedTool, settings = effective)
+        val processed = withContext(Dispatchers.Default) {
+            processImagePipeline(
+                source = source,
+                tool = selectedTool,
+                preset = selectedPreset,
+                settings = effective,
+                autoMotionAssistEnabled = autoMotionAssistEnabled
+            )
         }
-        val report = withContext(Dispatchers.Default) { analyzeBitmap(result) }
-        repairedBitmap = result
-        diagnosis = "Filtro ${selectedTool.label}: ${report.label}"
-        qualityScore = report.score
+        repairedBitmap = processed.bitmap
+        diagnosis = buildDiagnosisText(
+            tool = selectedTool,
+            report = processed.report,
+            autoMotionApplied = processed.autoMotionApplied,
+            portraitBoostApplied = processed.portraitBoostApplied
+        )
+        qualityScore = processed.report.score
         processingPreview = false
+    }
+
+    LaunchedEffect(batchRunning, batchQueue) {
+        if (!batchRunning || batchQueue.isEmpty()) return@LaunchedEffect
+        processingPreview = true
+        val queue = batchQueue
+        val toolSnapshot = selectedTool
+        val base = ImageSettings(
+            brightness = brightnessAdjust,
+            contrast = contrastAdjust,
+            sharpen = sharpenAdjust,
+            saturation = saturationAdjust,
+            warmth = warmthAdjust,
+            motionDeblur = motionDeblurAdjust
+        )
+        val presetSnapshot = selectedPreset
+        val settingsSnapshot = resolveSettings(tool = toolSnapshot, preset = presetSnapshot, base = base)
+
+        var savedCount = 0
+        var lastSource: Bitmap? = null
+        var lastResult: Bitmap? = null
+        var lastReport: ImageAnalysisReport? = null
+
+        queue.forEachIndexed { index, uri ->
+            val loaded = decodeBitmapForPreview(context = context, uri = uri)
+            if (loaded != null) {
+                val processed = withContext(Dispatchers.Default) {
+                    processImagePipeline(
+                        source = loaded,
+                        tool = toolSnapshot,
+                        preset = presetSnapshot,
+                        settings = settingsSnapshot,
+                        autoMotionAssistEnabled = autoMotionAssistEnabled
+                    )
+                }
+                val savedPath = saveBitmapToAppFolder(
+                    context = context,
+                    bitmap = processed.bitmap,
+                    prefix = "batch_repair_${index + 1}"
+                )
+                if (savedPath != null) savedCount++
+                lastSource = loaded
+                lastResult = processed.bitmap
+                lastReport = processed.report
+            }
+            batchDone = index + 1
+            diagnosis = "Procesando lote: ${batchDone}/${batchTotal}"
+        }
+
+        val finalSource = lastSource
+        if (finalSource != null) {
+            val finalBitmap = lastResult ?: finalSource
+            sourceBitmap = finalSource
+            repairedBitmap = finalBitmap
+            history = listOf(finalBitmap)
+            historyIndex = 0
+            val finalReport = lastReport ?: analyzeBitmap(finalBitmap)
+            diagnosis = "Lote completo: $savedCount/$batchTotal guardadas. ${finalReport.label}"
+            qualityScore = finalReport.score
+        } else {
+            diagnosis = "Lote completado, pero no se pudieron procesar imagenes."
+        }
+        snackbarHostState.showSnackbar("Lote finalizado: $savedCount de $batchTotal guardadas")
+        batchRunning = false
+        processingPreview = false
+        batchQueue = emptyList()
     }
 
     Scaffold(
@@ -413,6 +493,19 @@ fun RepairHomeScreen() {
                                 Slider(value = warmthAdjust, onValueChange = { warmthAdjust = it }, valueRange = -0.4f..0.4f)
                                 Text("Correcion movimiento: ${(motionDeblurAdjust * 100).toInt()}%")
                                 Slider(value = motionDeblurAdjust, onValueChange = { motionDeblurAdjust = it }, valueRange = 0f..1f)
+                                FilterChip(
+                                    selected = autoMotionAssistEnabled,
+                                    onClick = { autoMotionAssistEnabled = !autoMotionAssistEnabled },
+                                    label = {
+                                        Text(
+                                            if (autoMotionAssistEnabled) {
+                                                "Auto corregir foto movida: activo"
+                                            } else {
+                                                "Auto corregir foto movida: inactivo"
+                                            }
+                                        )
+                                    }
+                                )
                             }
                         }
                     }
@@ -479,7 +572,8 @@ private fun StatusBadge(text: String) {
 
 private data class ImageAnalysisReport(
     val label: String,
-    val score: Float
+    val score: Float,
+    val motionBlurScore: Float
 )
 
 private enum class EditTool(val label: String) {
@@ -516,6 +610,8 @@ private fun analyzeBitmap(bitmap: Bitmap): ImageAnalysisReport {
     val height = bitmap.height.coerceAtLeast(1)
     val sampleStep = (width / 80).coerceAtLeast(1)
     var edgeAccum = 0L
+    var horizontalAccum = 0L
+    var verticalAccum = 0L
     var brightnessAccum = 0L
     var count = 0L
     var y = 0
@@ -526,7 +622,11 @@ private fun analyzeBitmap(bitmap: Bitmap): ImageAnalysisReport {
             val c2 = bitmap.getPixel(x + sampleStep, y + sampleStep)
             val l1 = luminance(c1)
             val l2 = luminance(c2)
+            val hLum = luminance(bitmap.getPixel(x + sampleStep, y))
+            val vLum = luminance(bitmap.getPixel(x, y + sampleStep))
             edgeAccum += abs(l1 - l2).toLong()
+            horizontalAccum += abs(l1 - hLum).toLong()
+            verticalAccum += abs(l1 - vLum).toLong()
             brightnessAccum += l1.toLong()
             count++
             x += sampleStep
@@ -534,16 +634,30 @@ private fun analyzeBitmap(bitmap: Bitmap): ImageAnalysisReport {
         y += sampleStep
     }
     val edge = if (count == 0L) 0f else (edgeAccum.toFloat() / count.toFloat()) / 255f
+    val horizontal = if (count == 0L) 0f else (horizontalAccum.toFloat() / count.toFloat()) / 255f
+    val vertical = if (count == 0L) 0f else (verticalAccum.toFloat() / count.toFloat()) / 255f
     val brightness = if (count == 0L) 0f else (brightnessAccum.toFloat() / count.toFloat()) / 255f
+    val directionalAsymmetry = if (horizontal + vertical < 0.001f) {
+        0f
+    } else {
+        abs(horizontal - vertical) / (horizontal + vertical)
+    }
+    val lowSharpness = ((0.22f - edge).coerceAtLeast(0f) / 0.22f).coerceIn(0f, 1f)
+    val motionBlurScore = (lowSharpness * 0.72f + directionalAsymmetry * 0.28f).coerceIn(0f, 1f)
     val score = (edge * 0.65f + (1f - abs(0.55f - brightness)) * 0.35f).coerceIn(0f, 1f)
     val label = when {
         score >= 0.75f -> "Buena calidad"
-        edge < 0.12f -> "Posible foto movida o fuera de foco"
+        motionBlurScore > 0.55f -> "Foto movida detectada"
+        edge < 0.12f -> "Posible fuera de foco"
         brightness < 0.28f -> "Subexpuesta"
         brightness > 0.85f -> "Sobreexpuesta"
         else -> "Calidad media"
     }
-    return ImageAnalysisReport(label = label, score = score)
+    return ImageAnalysisReport(
+        label = label,
+        score = score,
+        motionBlurScore = motionBlurScore
+    )
 }
 
 private fun resolveSettings(tool: EditTool, preset: PresetFilter, base: ImageSettings): ImageSettings {
@@ -569,9 +683,11 @@ private fun applyPreset(settings: ImageSettings, preset: PresetFilter): ImageSet
             sharpen = (settings.sharpen + 0.08f).coerceIn(0f, 1f)
         )
         PresetFilter.PORTRAIT -> settings.copy(
-            brightness = (settings.brightness + 0.05f).coerceIn(-0.5f, 0.5f),
-            warmth = (settings.warmth + 0.08f).coerceIn(-0.5f, 0.5f),
-            contrast = (settings.contrast * 0.95f).coerceIn(0.6f, 1.8f)
+            brightness = (settings.brightness + 0.07f).coerceIn(-0.5f, 0.5f),
+            warmth = (settings.warmth + 0.10f).coerceIn(-0.5f, 0.5f),
+            contrast = (settings.contrast * 0.94f).coerceIn(0.6f, 1.8f),
+            saturation = (settings.saturation * 0.92f).coerceIn(0f, 2f),
+            sharpen = (settings.sharpen + 0.05f).coerceIn(0f, 1f)
         )
         PresetFilter.NIGHT -> settings.copy(
             brightness = (settings.brightness + 0.16f).coerceIn(-0.5f, 0.5f),
@@ -602,6 +718,64 @@ private fun applyTool(source: Bitmap, tool: EditTool, settings: ImageSettings): 
         EditTool.GRAYSCALE -> toGrayscale(source)
         EditTool.SEPIA -> sepia(source)
         EditTool.MANUAL_ADJUST -> improveImage(source, settings)
+    }
+}
+
+private data class PipelineResult(
+    val bitmap: Bitmap,
+    val report: ImageAnalysisReport,
+    val autoMotionApplied: Boolean,
+    val portraitBoostApplied: Boolean
+)
+
+private fun processImagePipeline(
+    source: Bitmap,
+    tool: EditTool,
+    preset: PresetFilter,
+    settings: ImageSettings,
+    autoMotionAssistEnabled: Boolean
+): PipelineResult {
+    var result = applyTool(source = source, tool = tool, settings = settings)
+    var report = analyzeBitmap(result)
+    var autoMotionApplied = false
+    val canAutoMotion = tool != EditTool.MOTION_FIX &&
+        tool != EditTool.EDGE_LINES &&
+        tool != EditTool.GRAYSCALE &&
+        tool != EditTool.SEPIA
+    if (autoMotionAssistEnabled && canAutoMotion && report.motionBlurScore > 0.46f) {
+        val dynamicAmount = max(settings.motionDeblur, report.motionBlurScore.coerceIn(0.25f, 0.9f))
+        result = fixMotionBlur(result, dynamicAmount)
+        report = analyzeBitmap(result)
+        autoMotionApplied = true
+    }
+    var portraitBoostApplied = false
+    if (preset == PresetFilter.PORTRAIT) {
+        result = enhancePortrait(result, settings)
+        report = analyzeBitmap(result)
+        portraitBoostApplied = true
+    }
+    return PipelineResult(
+        bitmap = result,
+        report = report,
+        autoMotionApplied = autoMotionApplied,
+        portraitBoostApplied = portraitBoostApplied
+    )
+}
+
+private fun buildDiagnosisText(
+    tool: EditTool,
+    report: ImageAnalysisReport,
+    autoMotionApplied: Boolean,
+    portraitBoostApplied: Boolean
+): String {
+    val suffix = buildList {
+        if (autoMotionApplied) add("auto corrigiendo movimiento")
+        if (portraitBoostApplied) add("retrato inteligente")
+    }.joinToString(separator = " + ")
+    return if (suffix.isBlank()) {
+        "Filtro ${tool.label}: ${report.label}"
+    } else {
+        "Filtro ${tool.label}: ${report.label} ($suffix)"
     }
 }
 
@@ -806,6 +980,68 @@ private fun fixMotionBlur(source: Bitmap, amount: Float): Bitmap {
     return result
 }
 
+private fun enhancePortrait(source: Bitmap, settings: ImageSettings): Bitmap {
+    val width = source.width
+    val height = source.height
+    if (width < 3 || height < 3) return source.copy(Bitmap.Config.ARGB_8888, true)
+    val src = source.copy(Bitmap.Config.ARGB_8888, false)
+    val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val smoothStrength = (0.18f + settings.motionDeblur * 0.22f).coerceIn(0.18f, 0.45f)
+    val glow = (8f + settings.brightness * 40f).toInt()
+    val warmBoost = (6f + settings.warmth * 30f).toInt()
+    for (y in 1 until height - 1) {
+        for (x in 1 until width - 1) {
+            val center = src.getPixel(x, y)
+            if (!isLikelySkinTone(center)) {
+                out.setPixel(x, y, center)
+                continue
+            }
+            val left = src.getPixel(x - 1, y)
+            val right = src.getPixel(x + 1, y)
+            val up = src.getPixel(x, y - 1)
+            val down = src.getPixel(x, y + 1)
+            val avgR = (Color.red(center) + Color.red(left) + Color.red(right) + Color.red(up) + Color.red(down)) / 5
+            val avgG = (Color.green(center) + Color.green(left) + Color.green(right) + Color.green(up) + Color.green(down)) / 5
+            val avgB = (Color.blue(center) + Color.blue(left) + Color.blue(right) + Color.blue(up) + Color.blue(down)) / 5
+
+            val r = (
+                Color.red(center) * (1f - smoothStrength) + avgR * smoothStrength + glow + warmBoost
+                ).toInt().coerceIn(0, 255)
+            val g = (
+                Color.green(center) * (1f - smoothStrength) + avgG * smoothStrength + (glow * 0.65f)
+                ).toInt().coerceIn(0, 255)
+            val b = (
+                Color.blue(center) * (1f - smoothStrength) + avgB * smoothStrength - (warmBoost * 0.45f)
+                ).toInt().coerceIn(0, 255)
+            out.setPixel(x, y, Color.argb(Color.alpha(center), r, g, b))
+        }
+    }
+    for (x in 0 until width) {
+        out.setPixel(x, 0, src.getPixel(x, 0))
+        out.setPixel(x, height - 1, src.getPixel(x, height - 1))
+    }
+    for (y in 0 until height) {
+        out.setPixel(0, y, src.getPixel(0, y))
+        out.setPixel(width - 1, y, src.getPixel(width - 1, y))
+    }
+    return out
+}
+
+private fun isLikelySkinTone(pixel: Int): Boolean {
+    val r = Color.red(pixel)
+    val g = Color.green(pixel)
+    val b = Color.blue(pixel)
+    val maxChannel = max(r, max(g, b))
+    val minChannel = minOf(r, minOf(g, b))
+    return r > 95 &&
+        g > 40 &&
+        b > 20 &&
+        (maxChannel - minChannel) > 15 &&
+        abs(r - g) > 10 &&
+        r > g &&
+        r > b
+}
+
 private fun luminance(pixel: Int): Int {
     val r = Color.red(pixel)
     val g = Color.green(pixel)
@@ -878,13 +1114,18 @@ private fun persistReadPermission(context: Context, uri: Uri) {
     }
 }
 
-private fun saveBitmapToAppFolder(context: Context, bitmap: Bitmap): String? {
+private fun saveBitmapToAppFolder(
+    context: Context,
+    bitmap: Bitmap,
+    prefix: String = "repair"
+): String? {
     val dir = File(
         context.getExternalFilesDir(Environment.DIRECTORY_PICTURES),
         "ReparaFotosAI"
     )
     if (!dir.exists() && !dir.mkdirs()) return null
-    val file = File(dir, "repair_${System.currentTimeMillis()}.jpg")
+    val safePrefix = prefix.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+    val file = File(dir, "${safePrefix}_${System.currentTimeMillis()}.jpg")
     return runCatching {
         FileOutputStream(file).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 94, out)
