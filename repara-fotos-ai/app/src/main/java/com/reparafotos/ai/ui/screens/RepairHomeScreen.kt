@@ -126,6 +126,9 @@ fun RepairHomeScreen() {
     var batchQueue by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var showPaywall by remember { mutableStateOf(false) }
     var showFullScreenPreview by remember { mutableStateOf(false) }
+    var basicOpenedImagesCount by remember { mutableIntStateOf(0) }
+    var pendingSingleOpenUri by remember { mutableStateOf<Uri?>(null) }
+    var showAdOrPremiumDialog by remember { mutableStateOf(false) }
 
     fun requestPremiumAccessOrOpenPaywall(): Boolean {
         if (monetizationState.isPremiumUnlocked) return true
@@ -137,7 +140,17 @@ fun RepairHomeScreen() {
     val singlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         persistReadPermission(context, uri)
-        selectedUri = uri
+        if (monetizationState.isPremiumUnlocked) {
+            selectedUri = uri
+            return@rememberLauncherForActivityResult
+        }
+        if (basicOpenedImagesCount < 3) {
+            basicOpenedImagesCount += 1
+            selectedUri = uri
+        } else {
+            pendingSingleOpenUri = uri
+            showAdOrPremiumDialog = true
+        }
     }
     val batchPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
@@ -402,6 +415,7 @@ fun RepairHomeScreen() {
                     MonetizationStatusCard(
                         isPremiumUnlocked = monetizationState.isPremiumUnlocked,
                         hasAds = !monetizationState.isPremiumUnlocked,
+                        basicRemainingFreeOpens = (3 - basicOpenedImagesCount).coerceAtLeast(0),
                         onOpenPaywall = { showPaywall = true },
                         onRestore = monetizationViewModel::restorePurchases
                     )
@@ -665,6 +679,28 @@ fun RepairHomeScreen() {
                 }
             },
             onRestore = monetizationViewModel::restorePurchases
+        )
+    }
+    if (showAdOrPremiumDialog) {
+        BasicLimitDialog(
+            onDismiss = {
+                showAdOrPremiumDialog = false
+                pendingSingleOpenUri = null
+            },
+            onWatchAd = {
+                val pendingUri = pendingSingleOpenUri
+                showAdOrPremiumDialog = false
+                if (pendingUri != null) {
+                    monetizationViewModel.showInterstitial(activity) {
+                        selectedUri = pendingUri
+                        pendingSingleOpenUri = null
+                    }
+                }
+            },
+            onGoPremium = {
+                showAdOrPremiumDialog = false
+                showPaywall = true
+            }
         )
     }
 }
@@ -1369,6 +1405,7 @@ private fun FullScreenImageDialog(
 private fun MonetizationStatusCard(
     isPremiumUnlocked: Boolean,
     hasAds: Boolean,
+    basicRemainingFreeOpens: Int,
     onOpenPaywall: () -> Unit,
     onRestore: () -> Unit
 ) {
@@ -1387,6 +1424,12 @@ private fun MonetizationStatusCard(
                 if (hasAds) "Anuncios: activos" else "Anuncios: desactivados",
                 style = MaterialTheme.typography.bodySmall
             )
+            if (!isPremiumUnlocked) {
+                Text(
+                    "Aperturas gratis restantes: $basicRemainingFreeOpens de 3",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1470,6 +1513,30 @@ private fun PremiumPaywallDialog(
                     Text("Restaurar compras")
                 }
             }
+        }
+    )
+}
+
+@Composable
+private fun BasicLimitDialog(
+    onDismiss: () -> Unit,
+    onWatchAd: () -> Unit,
+    onGoPremium: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(onClick = onWatchAd) { Text("Ver anuncio y abrir") }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onGoPremium) { Text("Pasar a Premium") }
+        },
+        title = { Text("Límite del plan básico") },
+        text = {
+            Text(
+                "Ya usaste tus 3 aperturas gratis. Puedes ver un anuncio para abrir una foto extra o pasarte a Premium.",
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     )
 }
