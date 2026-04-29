@@ -11,9 +11,11 @@ import android.os.Build
 import android.os.Environment
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -39,6 +41,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +50,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -168,208 +172,302 @@ fun RepairHomeScreen() {
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Repara Fotos AI") }) },
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                ),
+                title = {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Repara Fotos AI", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Estilo pro para restaurar imagenes en segundos",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            )
+        },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.background,
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            MaterialTheme.colorScheme.background
+                        )
+                    )
+                )
                 .padding(padding)
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Diagnostico de imagen", fontWeight = FontWeight.Bold)
-                        Text(
-                            "Vista previa en tiempo real. Procesamiento local, sin subir archivos.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text("Estado: $diagnosis", style = MaterialTheme.typography.bodySmall)
-                        LinearProgressIndicator(
-                            progress = { qualityScore.coerceIn(0f, 1f) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text("Calidad estimada: ${(qualityScore * 100).toInt()}%")
-                        Text(
-                            if (processingPreview) "Procesando cambios..."
-                            else "Preview activo",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        if (batchRunning) {
-                            val progress = if (batchTotal <= 0) 0f else batchDone.toFloat() / batchTotal.toFloat()
-                            LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-                            Text("Lote: $batchDone / $batchTotal")
-                        }
-                    }
-                }
-            }
-
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { singlePicker.launch(arrayOf("image/*")) }) {
-                        Text("Abrir imagen")
-                    }
-                    OutlinedButton(onClick = { batchPicker.launch(arrayOf("image/*")) }) {
-                        Text("Lote")
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            val current = repairedBitmap ?: return@OutlinedButton
-                            val path = saveBitmapToAppFolder(context, current)
-                            if (path == null) {
-                                diagnosis = "No se pudo guardar la imagen."
-                            } else {
-                                diagnosis = "Guardada en: $path"
-                            }
-                        },
-                        enabled = repairedBitmap != null
-                    ) {
-                        Text("Guardar")
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            repairedBitmap = sourceBitmap
-                            selectedTool = EditTool.AUTO_REPAIR
-                            selectedPreset = PresetFilter.NONE
-                            brightnessAdjust = 0f
-                            contrastAdjust = 1f
-                            sharpenAdjust = 0f
-                            saturationAdjust = 1f
-                            warmthAdjust = 0f
-                            history = sourceBitmap?.let { listOf(it) } ?: emptyList()
-                            historyIndex = if (history.isEmpty()) -1 else 0
-                        },
-                        enabled = sourceBitmap != null
-                    ) {
-                        Text("Reset")
-                    }
-                }
-            }
-
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            if (historyIndex > 0) {
-                                historyIndex--
-                                repairedBitmap = history[historyIndex]
-                            }
-                        },
-                        enabled = historyIndex > 0
-                    ) {
-                        Text("Deshacer")
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            if (historyIndex >= 0 && historyIndex < history.lastIndex) {
-                                historyIndex++
-                                repairedBitmap = history[historyIndex]
-                            }
-                        },
-                        enabled = historyIndex >= 0 && historyIndex < history.lastIndex
-                    ) {
-                        Text("Rehacer")
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            val current = repairedBitmap ?: return@OutlinedButton
-                            val trimmed = if (historyIndex >= 0 && historyIndex < history.size - 1) {
-                                history.take(historyIndex + 1)
-                            } else {
-                                history
-                            }
-                            history = trimmed + current
-                            historyIndex = history.lastIndex
-                        },
-                        enabled = repairedBitmap != null
-                    ) {
-                        Text("Aplicar")
-                    }
-                }
-            }
-
-            if (sourceBitmap != null) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 item {
-                    Text("Herramientas", fontWeight = FontWeight.Bold)
-                    FlowRow(
+                    val qualityPercent = (qualityScore * 100).toInt().coerceIn(0, 100)
+                    Card(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        shape = RoundedCornerShape(22.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                        )
                     ) {
-                        EditTool.entries.forEach { tool ->
-                            FilterChip(
-                                selected = selectedTool == tool,
-                                onClick = { selectedTool = tool },
-                                label = { Text(tool.label, modifier = Modifier.widthIn(min = 72.dp)) }
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    Text("Filtros predeterminados", fontWeight = FontWeight.Bold)
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        PresetFilter.entries.forEach { preset ->
-                            FilterChip(
-                                selected = selectedPreset == preset,
-                                onClick = { selectedPreset = preset },
-                                label = { Text(preset.label, modifier = Modifier.widthIn(min = 72.dp)) }
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
                         Column(
-                            modifier = Modifier.padding(12.dp),
+                            modifier = Modifier.padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("Ajustes manuales", fontWeight = FontWeight.SemiBold)
-                            Text("Brillo: ${(brightnessAdjust * 100).toInt()}%")
-                            Slider(value = brightnessAdjust, onValueChange = { brightnessAdjust = it }, valueRange = -0.5f..0.5f)
-                            Text("Contraste: ${(contrastAdjust * 100).toInt()}%")
-                            Slider(value = contrastAdjust, onValueChange = { contrastAdjust = it }, valueRange = 0.6f..1.8f)
-                            Text("Nitidez: ${(sharpenAdjust * 100).toInt()}%")
-                            Slider(value = sharpenAdjust, onValueChange = { sharpenAdjust = it }, valueRange = 0f..1f)
-                            Text("Saturacion: ${(saturationAdjust * 100).toInt()}%")
-                            Slider(value = saturationAdjust, onValueChange = { saturationAdjust = it }, valueRange = 0f..2f)
-                            Text("Temperatura: ${(warmthAdjust * 100).toInt()}%")
-                            Slider(value = warmthAdjust, onValueChange = { warmthAdjust = it }, valueRange = -0.4f..0.4f)
+                            Text("Diagnostico inteligente", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Procesamiento local, sin subir archivos. Visual premium con resultados en tiempo real.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text("Estado actual: $diagnosis", style = MaterialTheme.typography.bodyMedium)
+                            LinearProgressIndicator(
+                                progress = { qualityScore.coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Calidad estimada: $qualityPercent%")
+                                StatusBadge(text = if (processingPreview) "Procesando" else "Preview activa")
+                            }
+                            if (batchRunning) {
+                                val progress = if (batchTotal <= 0) 0f else batchDone.toFloat() / batchTotal.toFloat()
+                                LinearProgressIndicator(
+                                    progress = { progress.coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Text("Procesamiento por lote: $batchDone / $batchTotal", style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
 
                 item {
-                    Text("Antes / Despues", fontWeight = FontWeight.Bold)
-                }
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        ImagePanel(title = "Original", bitmap = sourceBitmap, modifier = Modifier.weight(1f))
-                        ImagePanel(title = "Reparada", bitmap = repairedBitmap ?: sourceBitmap, modifier = Modifier.weight(1f))
+                    SectionTitle("Acciones")
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(onClick = { singlePicker.launch(arrayOf("image/*")) }) {
+                            Text("Abrir imagen")
+                        }
+                        OutlinedButton(onClick = { batchPicker.launch(arrayOf("image/*")) }) {
+                            Text("Procesar lote")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val current = repairedBitmap ?: return@OutlinedButton
+                                val path = saveBitmapToAppFolder(context, current)
+                                if (path == null) {
+                                    diagnosis = "No se pudo guardar la imagen."
+                                } else {
+                                    diagnosis = "Guardada en: $path"
+                                }
+                            },
+                            enabled = repairedBitmap != null
+                        ) {
+                            Text("Guardar")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                repairedBitmap = sourceBitmap
+                                selectedTool = EditTool.AUTO_REPAIR
+                                selectedPreset = PresetFilter.NONE
+                                brightnessAdjust = 0f
+                                contrastAdjust = 1f
+                                sharpenAdjust = 0f
+                                saturationAdjust = 1f
+                                warmthAdjust = 0f
+                                history = sourceBitmap?.let { listOf(it) } ?: emptyList()
+                                historyIndex = if (history.isEmpty()) -1 else 0
+                            },
+                            enabled = sourceBitmap != null
+                        ) {
+                            Text("Reset")
+                        }
                     }
                 }
-            } else {
+
                 item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "Selecciona una foto para empezar el diagnostico.",
-                            modifier = Modifier.padding(12.dp)
-                        )
+                    SectionTitle("Historial")
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                if (historyIndex > 0) {
+                                    historyIndex--
+                                    repairedBitmap = history[historyIndex]
+                                }
+                            },
+                            enabled = historyIndex > 0
+                        ) {
+                            Text("Deshacer")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                if (historyIndex >= 0 && historyIndex < history.lastIndex) {
+                                    historyIndex++
+                                    repairedBitmap = history[historyIndex]
+                                }
+                            },
+                            enabled = historyIndex >= 0 && historyIndex < history.lastIndex
+                        ) {
+                            Text("Rehacer")
+                        }
+                        Button(
+                            onClick = {
+                                val current = repairedBitmap ?: return@Button
+                                val trimmed = if (historyIndex >= 0 && historyIndex < history.size - 1) {
+                                    history.take(historyIndex + 1)
+                                } else {
+                                    history
+                                }
+                                history = trimmed + current
+                                historyIndex = history.lastIndex
+                            },
+                            enabled = repairedBitmap != null
+                        ) {
+                            Text("Aplicar cambios")
+                        }
+                    }
+                }
+
+                if (sourceBitmap != null) {
+                    item {
+                        SectionTitle("Herramientas")
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            EditTool.entries.forEach { tool ->
+                                FilterChip(
+                                    selected = selectedTool == tool,
+                                    onClick = { selectedTool = tool },
+                                    label = { Text(tool.label, modifier = Modifier.widthIn(min = 72.dp)) }
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        SectionTitle("Presets visuales")
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            PresetFilter.entries.forEach { preset ->
+                                FilterChip(
+                                    selected = selectedPreset == preset,
+                                    onClick = { selectedPreset = preset },
+                                    label = { Text(preset.label, modifier = Modifier.widthIn(min = 72.dp)) }
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("Ajustes manuales", fontWeight = FontWeight.SemiBold)
+                                Text("Brillo: ${(brightnessAdjust * 100).toInt()}%")
+                                Slider(value = brightnessAdjust, onValueChange = { brightnessAdjust = it }, valueRange = -0.5f..0.5f)
+                                Text("Contraste: ${(contrastAdjust * 100).toInt()}%")
+                                Slider(value = contrastAdjust, onValueChange = { contrastAdjust = it }, valueRange = 0.6f..1.8f)
+                                Text("Nitidez: ${(sharpenAdjust * 100).toInt()}%")
+                                Slider(value = sharpenAdjust, onValueChange = { sharpenAdjust = it }, valueRange = 0f..1f)
+                                Text("Saturacion: ${(saturationAdjust * 100).toInt()}%")
+                                Slider(value = saturationAdjust, onValueChange = { saturationAdjust = it }, valueRange = 0f..2f)
+                                Text("Temperatura: ${(warmthAdjust * 100).toInt()}%")
+                                Slider(value = warmthAdjust, onValueChange = { warmthAdjust = it }, valueRange = -0.4f..0.4f)
+                            }
+                        }
+                    }
+
+                    item { SectionTitle("Antes y despues") }
+                    item {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            ImagePanel(title = "Original", bitmap = sourceBitmap, modifier = Modifier.weight(1f))
+                            ImagePanel(title = "Reparada", bitmap = repairedBitmap ?: sourceBitmap, modifier = Modifier.weight(1f))
+                        }
+                    }
+                } else {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(18.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text("Listo para reparar", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = "Selecciona una foto para comenzar el diagnostico y aplicar mejoras con un look profesional.",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold
+    )
+}
+
+@Composable
+private fun StatusBadge(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = Modifier
+            .background(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = RoundedCornerShape(999.dp)
+            )
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    )
 }
 
 private data class ImageAnalysisReport(
