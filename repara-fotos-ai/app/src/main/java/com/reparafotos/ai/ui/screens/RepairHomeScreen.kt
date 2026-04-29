@@ -1,5 +1,6 @@
 package com.reparafotos.ai.ui.screens
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -14,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,14 +26,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -40,6 +49,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -53,9 +63,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.forenserecovery.android.domain.model.ScanMode
+import com.forenserecovery.android.monetization.MonetizationConfig
+import com.forenserecovery.android.ui.viewmodel.MonetizationUiState
+import com.forenserecovery.android.ui.viewmodel.MonetizationViewModel
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -69,7 +94,10 @@ import kotlin.math.sqrt
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 fun RepairHomeScreen() {
     val context = LocalContext.current
+    val activity = context as? Activity
     val snackbarHostState = remember { SnackbarHostState() }
+    val monetizationViewModel: MonetizationViewModel = viewModel()
+    val monetizationState by monetizationViewModel.ui.collectAsStateWithLifecycle()
 
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -96,6 +124,15 @@ fun RepairHomeScreen() {
     var batchTotal by remember { mutableIntStateOf(0) }
     var batchDone by remember { mutableIntStateOf(0) }
     var batchQueue by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var showPaywall by remember { mutableStateOf(false) }
+    var showFullScreenPreview by remember { mutableStateOf(false) }
+
+    fun requestPremiumAccessOrOpenPaywall(): Boolean {
+        if (monetizationState.isPremiumUnlocked) return true
+        val allowed = monetizationViewModel.ensureAccessOrShowPaywall(ScanMode.FORENSIC)
+        if (!allowed) showPaywall = true
+        return allowed
+    }
 
     val singlePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -104,12 +141,33 @@ fun RepairHomeScreen() {
     }
     val batchPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        if (!requestPremiumAccessOrOpenPaywall()) return@rememberLauncherForActivityResult
         uris.forEach { persistReadPermission(context, it) }
         batchQueue = uris
         batchTotal = uris.size
         batchDone = 0
         batchRunning = true
         diagnosis = "Iniciando procesamiento por lote..."
+    }
+
+    LaunchedEffect(Unit) {
+        monetizationViewModel.startBilling()
+        monetizationViewModel.preloadAds()
+    }
+    LaunchedEffect(monetizationState.showPaywall) {
+        showPaywall = monetizationState.showPaywall
+    }
+    LaunchedEffect(monetizationState.message) {
+        val msg = monetizationState.message ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(msg)
+        monetizationViewModel.clearMessage()
+    }
+    LaunchedEffect(monetizationState.isPremiumUnlocked) {
+        if (monetizationState.isPremiumUnlocked) {
+            monetizationViewModel.consumePendingMode()
+            showPaywall = false
+            snackbarHostState.showSnackbar("Premium activo. Funciones avanzadas desbloqueadas.")
+        }
     }
 
     LaunchedEffect(selectedUri) {
@@ -327,6 +385,7 @@ fun RepairHomeScreen() {
                                 Text("Calidad estimada: $qualityPercent%")
                                 StatusBadge(text = if (processingPreview) "Procesando" else "Preview activa")
                             }
+                            ProcessingClockIndicator(isProcessing = processingPreview)
                             if (batchRunning) {
                                 val progress = if (batchTotal <= 0) 0f else batchDone.toFloat() / batchTotal.toFloat()
                                 LinearProgressIndicator(
@@ -340,6 +399,20 @@ fun RepairHomeScreen() {
                 }
 
                 item {
+                    MonetizationStatusCard(
+                        isPremiumUnlocked = monetizationState.isPremiumUnlocked,
+                        hasAds = !monetizationState.isPremiumUnlocked,
+                        onOpenPaywall = { showPaywall = true },
+                        onRestore = monetizationViewModel::restorePurchases
+                    )
+                }
+                if (!monetizationState.isPremiumUnlocked) {
+                    item {
+                        BasicModeBannerAd(adUnitId = MonetizationConfig.bannerAdUnitId)
+                    }
+                }
+
+                item {
                     SectionTitle("Acciones")
                     FlowRow(
                         modifier = Modifier.fillMaxWidth(),
@@ -349,17 +422,27 @@ fun RepairHomeScreen() {
                         Button(onClick = { singlePicker.launch(arrayOf("image/*")) }) {
                             Text("Abrir imagen")
                         }
-                        OutlinedButton(onClick = { batchPicker.launch(arrayOf("image/*")) }) {
+                        OutlinedButton(onClick = {
+                            if (!requestPremiumAccessOrOpenPaywall()) return@OutlinedButton
+                            batchPicker.launch(arrayOf("image/*"))
+                        }) {
                             Text("Procesar lote")
                         }
                         OutlinedButton(
                             onClick = {
                                 val current = repairedBitmap ?: return@OutlinedButton
-                                val path = saveBitmapToAppFolder(context, current)
-                                if (path == null) {
-                                    diagnosis = "No se pudo guardar la imagen."
+                                val doSave = {
+                                    val path = saveBitmapToAppFolder(context, current)
+                                    if (path == null) {
+                                        diagnosis = "No se pudo guardar la imagen."
+                                    } else {
+                                        diagnosis = "Guardada en: $path"
+                                    }
+                                }
+                                if (!monetizationState.isPremiumUnlocked) {
+                                    monetizationViewModel.showInterstitial(activity) { doSave() }
                                 } else {
-                                    diagnosis = "Guardada en: $path"
+                                    doSave()
                                 }
                             },
                             enabled = repairedBitmap != null
@@ -445,7 +528,13 @@ fun RepairHomeScreen() {
                             EditTool.entries.forEach { tool ->
                                 FilterChip(
                                     selected = selectedTool == tool,
-                                    onClick = { selectedTool = tool },
+                                    onClick = {
+                                        val needsPremium = tool == EditTool.MOTION_FIX
+                                        if (needsPremium && !requestPremiumAccessOrOpenPaywall()) {
+                                            return@FilterChip
+                                        }
+                                        selectedTool = tool
+                                    },
                                     label = { Text(tool.label, modifier = Modifier.widthIn(min = 72.dp)) }
                                 )
                             }
@@ -462,7 +551,13 @@ fun RepairHomeScreen() {
                             PresetFilter.entries.forEach { preset ->
                                 FilterChip(
                                     selected = selectedPreset == preset,
-                                    onClick = { selectedPreset = preset },
+                                    onClick = {
+                                        val needsPremium = preset == PresetFilter.PORTRAIT
+                                        if (needsPremium && !requestPremiumAccessOrOpenPaywall()) {
+                                            return@FilterChip
+                                        }
+                                        selectedPreset = preset
+                                    },
                                     label = { Text(preset.label, modifier = Modifier.widthIn(min = 72.dp)) }
                                 )
                             }
@@ -517,7 +612,12 @@ fun RepairHomeScreen() {
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             ImagePanel(title = "Original", bitmap = sourceBitmap, modifier = Modifier.weight(1f))
-                            ImagePanel(title = "Reparada", bitmap = repairedBitmap ?: sourceBitmap, modifier = Modifier.weight(1f))
+                            ImagePanel(
+                                title = "Reparada",
+                                bitmap = repairedBitmap ?: sourceBitmap,
+                                modifier = Modifier.weight(1f),
+                                onClick = { showFullScreenPreview = true }
+                            )
                         }
                     }
                 } else {
@@ -543,6 +643,29 @@ fun RepairHomeScreen() {
                 }
             }
         }
+    }
+
+    if (showFullScreenPreview && repairedBitmap != null) {
+        FullScreenImageDialog(
+            title = "Vista completa - imagen reparada",
+            bitmap = repairedBitmap!!,
+            onDismiss = { showFullScreenPreview = false }
+        )
+    }
+    if (showPaywall) {
+        PremiumPaywallDialog(
+            state = monetizationState,
+            onDismiss = {
+                showPaywall = false
+                monetizationViewModel.dismissPaywall()
+            },
+            onBuy = { productId ->
+                if (activity != null) {
+                    monetizationViewModel.launchPurchase(activity, productId)
+                }
+            },
+            onRestore = monetizationViewModel::restorePurchases
+        )
     }
 }
 
@@ -1138,7 +1261,8 @@ private fun saveBitmapToAppFolder(
 private fun ImagePanel(
     title: String,
     bitmap: Bitmap?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     Card(modifier = modifier) {
         Column(
@@ -1165,9 +1289,187 @@ private fun ImagePanel(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(160.dp)
+                        .then(
+                            if (onClick != null) {
+                                Modifier.clickable { onClick() }
+                            } else {
+                                Modifier
+                            }
+                        )
                         .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
                 )
             }
         }
     }
+}
+
+@Composable
+private fun ProcessingClockIndicator(isProcessing: Boolean) {
+    if (!isProcessing) return
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+        Icon(
+            imageVector = Icons.Outlined.Schedule,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            "Procesando cambios...",
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
+private fun FullScreenImageDialog(
+    title: String,
+    bitmap: Bitmap,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    TextButton(onClick = onDismiss) { Text("Cerrar") }
+                }
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = title,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentScale = ContentScale.Fit
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MonetizationStatusCard(
+    isPremiumUnlocked: Boolean,
+    hasAds: Boolean,
+    onOpenPaywall: () -> Unit,
+    onRestore: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Plan actual", fontWeight = FontWeight.Bold)
+            Text(
+                if (isPremiumUnlocked) {
+                    "Premium activo: sin anuncios + funciones avanzadas desbloqueadas."
+                } else {
+                    "Básico gratis: con anuncios y funciones premium bloqueadas."
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                if (hasAds) "Anuncios: activos" else "Anuncios: desactivados",
+                style = MaterialTheme.typography.bodySmall
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (!isPremiumUnlocked) {
+                    Button(onClick = onOpenPaywall) { Text("Pasar a Premium") }
+                }
+                OutlinedButton(onClick = onRestore) { Text("Restaurar compras") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BasicModeBannerAd(
+    adUnitId: String
+) {
+    val isPreview = LocalInspectionMode.current
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Publicidad (modo básico)", style = MaterialTheme.typography.bodySmall)
+            if (isPreview) {
+                Text("Banner preview", style = MaterialTheme.typography.bodySmall)
+            } else {
+                AndroidView(
+                    modifier = Modifier.fillMaxWidth(),
+                    factory = { ctx ->
+                        AdView(ctx).apply {
+                            setAdSize(AdSize.BANNER)
+                            this.adUnitId = adUnitId
+                            loadAd(AdRequest.Builder().build())
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PremiumPaywallDialog(
+    state: MonetizationUiState,
+    onDismiss: () -> Unit,
+    onBuy: (String) -> Unit,
+    onRestore: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("Cerrar") }
+        },
+        title = { Text("Premium Repara Fotos AI") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Desbloquea funciones pro: procesamiento por lote, retrato inteligente, corrección avanzada y sin anuncios.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (!state.isReady) {
+                    Text("Conectando a Google Play Billing...", style = MaterialTheme.typography.bodySmall)
+                }
+                if (state.products.isEmpty()) {
+                    Text(
+                        "Aún no hay productos cargados. Verifica los IDs en Play Console.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    state.products.forEachIndexed { index, product ->
+                        if (index > 0) HorizontalDivider()
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(product.title, fontWeight = FontWeight.SemiBold)
+                            Text(product.description, style = MaterialTheme.typography.bodySmall)
+                            Text(product.price, style = MaterialTheme.typography.bodySmall)
+                            Button(onClick = { onBuy(product.productId) }) {
+                                Text("Comprar")
+                            }
+                        }
+                    }
+                }
+                OutlinedButton(onClick = onRestore) {
+                    Text("Restaurar compras")
+                }
+            }
+        }
+    )
 }
