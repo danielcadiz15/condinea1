@@ -84,6 +84,7 @@ fun RepairHomeScreen() {
     var sharpenAdjust by remember { mutableFloatStateOf(0f) }
     var saturationAdjust by remember { mutableFloatStateOf(1f) }
     var warmthAdjust by remember { mutableFloatStateOf(0f) }
+    var motionDeblurAdjust by remember { mutableFloatStateOf(0.35f) }
 
     var selectedTool by remember { mutableStateOf(EditTool.AUTO_REPAIR) }
     var selectedPreset by remember { mutableStateOf(PresetFilter.NONE) }
@@ -125,6 +126,7 @@ fun RepairHomeScreen() {
         sharpenAdjust = 0f
         saturationAdjust = 1f
         warmthAdjust = 0f
+        motionDeblurAdjust = 0.35f
         selectedTool = EditTool.AUTO_REPAIR
         selectedPreset = PresetFilter.NONE
         history = listOf(loaded)
@@ -145,6 +147,7 @@ fun RepairHomeScreen() {
         sharpenAdjust,
         saturationAdjust,
         warmthAdjust,
+        motionDeblurAdjust,
         historyIndex
     ) {
         val source = sourceBitmap ?: return@LaunchedEffect
@@ -158,7 +161,8 @@ fun RepairHomeScreen() {
             contrast = contrastAdjust,
             sharpen = sharpenAdjust,
             saturation = saturationAdjust,
-            warmth = warmthAdjust
+            warmth = warmthAdjust,
+            motionDeblur = motionDeblurAdjust
         )
         val effective = resolveSettings(tool = selectedTool, preset = selectedPreset, base = base)
         val result = withContext(Dispatchers.Default) {
@@ -292,6 +296,7 @@ fun RepairHomeScreen() {
                                 sharpenAdjust = 0f
                                 saturationAdjust = 1f
                                 warmthAdjust = 0f
+                                motionDeblurAdjust = 0.35f
                                 history = sourceBitmap?.let { listOf(it) } ?: emptyList()
                                 historyIndex = if (history.isEmpty()) -1 else 0
                             },
@@ -406,6 +411,8 @@ fun RepairHomeScreen() {
                                 Slider(value = saturationAdjust, onValueChange = { saturationAdjust = it }, valueRange = 0f..2f)
                                 Text("Temperatura: ${(warmthAdjust * 100).toInt()}%")
                                 Slider(value = warmthAdjust, onValueChange = { warmthAdjust = it }, valueRange = -0.4f..0.4f)
+                                Text("Correcion movimiento: ${(motionDeblurAdjust * 100).toInt()}%")
+                                Slider(value = motionDeblurAdjust, onValueChange = { motionDeblurAdjust = it }, valueRange = 0f..1f)
                             }
                         }
                     }
@@ -477,6 +484,7 @@ private data class ImageAnalysisReport(
 
 private enum class EditTool(val label: String) {
     AUTO_REPAIR("Auto"),
+    MOTION_FIX("Movimiento"),
     INVERT("Invertir"),
     EDGE_LINES("Lineas"),
     ENHANCE_FOCUS("Enfoque"),
@@ -499,7 +507,8 @@ private data class ImageSettings(
     val contrast: Float,
     val sharpen: Float,
     val saturation: Float,
-    val warmth: Float
+    val warmth: Float,
+    val motionDeblur: Float
 )
 
 private fun analyzeBitmap(bitmap: Bitmap): ImageAnalysisReport {
@@ -529,7 +538,7 @@ private fun analyzeBitmap(bitmap: Bitmap): ImageAnalysisReport {
     val score = (edge * 0.65f + (1f - abs(0.55f - brightness)) * 0.35f).coerceIn(0f, 1f)
     val label = when {
         score >= 0.75f -> "Buena calidad"
-        edge < 0.12f -> "Posible fuera de foco"
+        edge < 0.12f -> "Posible foto movida o fuera de foco"
         brightness < 0.28f -> "Subexpuesta"
         brightness > 0.85f -> "Sobreexpuesta"
         else -> "Calidad media"
@@ -544,7 +553,8 @@ private fun resolveSettings(tool: EditTool, preset: PresetFilter, base: ImageSet
             brightness = (settings.brightness + 0.06f).coerceIn(-0.5f, 0.5f),
             contrast = (settings.contrast * 1.08f).coerceIn(0.6f, 1.8f),
             sharpen = (settings.sharpen + 0.18f).coerceIn(0f, 1f),
-            saturation = (settings.saturation * 1.05f).coerceIn(0f, 2f)
+            saturation = (settings.saturation * 1.05f).coerceIn(0f, 2f),
+            motionDeblur = (settings.motionDeblur + 0.15f).coerceIn(0f, 1f)
         )
     }
     return applyPreset(settings, preset)
@@ -585,6 +595,7 @@ private fun applyPreset(settings: ImageSettings, preset: PresetFilter): ImageSet
 private fun applyTool(source: Bitmap, tool: EditTool, settings: ImageSettings): Bitmap {
     return when (tool) {
         EditTool.AUTO_REPAIR -> improveImage(source, settings)
+        EditTool.MOTION_FIX -> fixMotionBlur(source, settings.motionDeblur.coerceAtLeast(0.2f))
         EditTool.INVERT -> invertColors(source)
         EditTool.EDGE_LINES -> detectEdges(source)
         EditTool.ENHANCE_FOCUS -> sharpenBitmap(source, settings.sharpen.coerceAtLeast(0.35f))
@@ -744,6 +755,55 @@ private fun sharpenBitmap(source: Bitmap, amount: Float): Bitmap {
         dst.setPixel(width - 1, y, src.getPixel(width - 1, y))
     }
     return dst
+}
+
+private fun fixMotionBlur(source: Bitmap, amount: Float): Bitmap {
+    val strength = amount.coerceIn(0f, 1f)
+    if (strength <= 0f) return source.copy(Bitmap.Config.ARGB_8888, true)
+    val width = source.width
+    val height = source.height
+    if (width < 3 || height < 3) return source.copy(Bitmap.Config.ARGB_8888, true)
+
+    val src = source.copy(Bitmap.Config.ARGB_8888, false)
+    val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val blend = (0.22f + 0.58f * strength).coerceIn(0.22f, 0.8f)
+
+    for (y in 1 until height - 1) {
+        for (x in 1 until width - 1) {
+            val center = src.getPixel(x, y)
+            val left = src.getPixel(x - 1, y)
+            val right = src.getPixel(x + 1, y)
+            val up = src.getPixel(x, y - 1)
+            val down = src.getPixel(x, y + 1)
+
+            val avgR = (Color.red(left) + Color.red(right) + Color.red(up) + Color.red(down)) / 4
+            val avgG = (Color.green(left) + Color.green(right) + Color.green(up) + Color.green(down)) / 4
+            val avgB = (Color.blue(left) + Color.blue(right) + Color.blue(up) + Color.blue(down)) / 4
+
+            val deblurR = (Color.red(center) * (1f + 1.7f * strength) - avgR * (0.7f * strength)).toInt()
+            val deblurG = (Color.green(center) * (1f + 1.7f * strength) - avgG * (0.7f * strength)).toInt()
+            val deblurB = (Color.blue(center) * (1f + 1.7f * strength) - avgB * (0.7f * strength)).toInt()
+
+            val outR = (Color.red(center) * (1f - blend) + deblurR * blend).toInt().coerceIn(0, 255)
+            val outG = (Color.green(center) * (1f - blend) + deblurG * blend).toInt().coerceIn(0, 255)
+            val outB = (Color.blue(center) * (1f - blend) + deblurB * blend).toInt().coerceIn(0, 255)
+
+            result.setPixel(
+                x,
+                y,
+                Color.argb(Color.alpha(center), outR, outG, outB)
+            )
+        }
+    }
+    for (x in 0 until width) {
+        result.setPixel(x, 0, src.getPixel(x, 0))
+        result.setPixel(x, height - 1, src.getPixel(x, height - 1))
+    }
+    for (y in 0 until height) {
+        result.setPixel(0, y, src.getPixel(0, y))
+        result.setPixel(width - 1, y, src.getPixel(width - 1, y))
+    }
+    return result
 }
 
 private fun luminance(pixel: Int): Int {
